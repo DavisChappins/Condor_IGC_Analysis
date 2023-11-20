@@ -6,10 +6,11 @@ import os
 
 
 #do not run this file, run generateSummary.py
+#file_name = "US Soaring Q4 2023 Oct Nov Dec-Competition day 13-DC1-256263.igc"
+
 
 
 def add_igc_to_summary(file_name):
-
     # Read the file and store each line as an element in a list
     with open(file_name, 'r') as file:
         igc_data = [line.strip() for line in file.readlines()]
@@ -47,9 +48,12 @@ def add_igc_to_summary(file_name):
         flight_data = calculate_task_finish(flight_data, igc_data)
 
         flight_data = analyze_heading_changes(flight_data)
+        
+        flight_data = add_calculated_ias(flight_data)
 
         flight_data = trim_records_by_task(flight_data)
-
+        
+        
 
         flight_data = label_thermal_series(flight_data)
         flight_data = label_glide_series(flight_data)
@@ -93,10 +97,11 @@ def add_igc_to_summary(file_name):
 
         task_distance_km, task_distance_nmi = extract_task_distance(igc_data)
 
-
-        #average_ias_kmh = calculate_indicated_airspeed(glide_info['Overall']['overall_glide_speed_kmh'], average_altitude_m)
+        #average_ias_kmh = glide_info['Overall']['overall_glide_ias_kmh']
+        #average_ias_kts = glide_info['Overall']['overall_glide_ias_kts']
+        
         average_ias_kmh = calculate_indicated_airspeed(glide_info['Overall']['overall_glide_speed_kmh'], average_altitude_m)
-
+        average_ias_kmh = calculate_indicated_airspeed(glide_info['Overall']['overall_glide_speed_kmh'], average_altitude_m)
         average_ias_kts = round(average_ias_kmh * 0.539957,2)
         
         #get valid glides (>2km) for counting average, see count_valid_rows function
@@ -174,3 +179,5 @@ def add_igc_to_summary(file_name):
 
     else:
         print(pilot_id,'did not finish the task so this calculation will not run')
+
+
