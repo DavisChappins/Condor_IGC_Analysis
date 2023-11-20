@@ -20,7 +20,7 @@ def process_igc_data(igc_data):
     flight_data = [line for line in igc_data if line.startswith('B')]
 
     # Add column names at index 0
-    column_names = ["record", "timeutc", "latitude", "longitude", "validity", "pressAlt", "gnssAlt", "heading", "distance", "groundspeed", "headingChange","glideOrThermal", "task"]
+    column_names = ["record", "timeutc", "latitude", "longitude", "validity", "pressAlt", "gnssAlt", "heading", "distance", "groundspeed", "headingChange","glideOrThermal", "task","indicatedairspeed"]
     flight_data.insert(0, column_names)
 
     # Split each row into specified columns
@@ -41,8 +41,9 @@ def process_igc_data(igc_data):
         headingChange = "" #in degrees
         glide_or_thermal = ""  # You can replace this with the actual values
         task = ""  # You can replace this with the actual values
+        indicatedairspeed = ""
 
-        flight_data[index] = [record, timeutc, latitude, longitude, validity, pressAlt, gnssAlt, heading, distance, groundspeed, headingChange, glide_or_thermal, task]
+        flight_data[index] = [record, timeutc, latitude, longitude, validity, pressAlt, gnssAlt, heading, distance, groundspeed, headingChange, glide_or_thermal, task, indicatedairspeed]
 
     return flight_data
 
@@ -152,6 +153,19 @@ def calculate_groundspeed(flight_data):
 
     return flight_data
 
+def add_calculated_ias(flight_data):
+    #calculate indicated airspeed and put in flight_data
+    for i in range(1,len(flight_data)):
+        #calculate ias (estimated) in kmh
+        try:
+            calculated_ias = calculate_indicated_airspeed(float(flight_data[i][9]),float(flight_data[i][5]))
+        except:
+            pass
+        
+        flight_data[i][13] = int(calculated_ias)
+
+    return flight_data
+        
 
 def extract_start_time(igc_data):
     # Extract the start time from igc_data
@@ -507,6 +521,8 @@ def glide_sequence(glide_data):
     total_glide_time_s = 0
     total_glide_distance = 0
     total_glide_height_gained = 0
+    total_glide_ias_foraverage = 0
+    glide_ias_counter = 0
 
 
     for key, data in glide_data.items():
@@ -526,6 +542,7 @@ def glide_sequence(glide_data):
 
         if glide_time_s != 0:
             glide_speed_kmh = total_distance/1000 / glide_time_s * 3600
+            glide_ias_kmh = calculate_indicated_airspeed(glide_speed_kmh, float(data[i][5]))
         else:
             #print(f"Error: Division by zero (glide_time_s is zero for {key}).")
             glide_speed_kmh = None
@@ -543,6 +560,7 @@ def glide_sequence(glide_data):
         
         glide_time_mmss = convert_seconds_to_mmss(glide_time_s)
         glide_speed_kts = glide_speed_kmh * 0.539957
+        glide_ias_kts = glide_ias_kmh * 0.539957
 
 
         glide_info[key] = {
@@ -551,6 +569,8 @@ def glide_sequence(glide_data):
             'glide_time_mmss': glide_time_mmss,
             'glide_speed_kmh': int(glide_speed_kmh),
             'glide_speed_kts': int(glide_speed_kts),
+            'glide_ias_kmh': int(glide_ias_kmh),
+            'glide_ias_kts': int(glide_ias_kts),
             'total_distance_km': round(total_distance_km,2),
             'total_distance_nmi': round(total_distance_nmi,2)
         }
@@ -558,6 +578,8 @@ def glide_sequence(glide_data):
         total_glide_time_s += glide_time_s
         total_glide_distance += total_distance
         total_glide_height_gained += total_height_gained
+        total_glide_ias_foraverage += glide_ias_kmh
+        glide_ias_counter += 1
         
         
     # Calculate overall L/D ratio
@@ -570,6 +592,11 @@ def glide_sequence(glide_data):
     overall_glide_speed_ms = total_glide_distance / total_glide_time_s
     overall_glide_speed_kmh = overall_glide_speed_ms * 3.6
     overall_glide_speed_kts = overall_glide_speed_ms * 1.94384
+    overall_glide_ias_kmh = total_glide_ias_foraverage / glide_ias_counter
+    overall_glide_ias_kts = overall_glide_ias_kmh * 0.539957
+    overall_glide_ias_kmh = overall_glide_ias_kmh
+    overall_glide_ias_kts = overall_glide_ias_kts
+    #print('overall_glide_ias_kmh',overall_glide_ias_kmh)
     
     
     total_glide_time_mmss = convert_seconds_to_mmss(total_glide_time_s)
@@ -584,7 +611,9 @@ def glide_sequence(glide_data):
         'glide_time_s': total_glide_time_s,
         'total_glide_time_mmss': total_glide_time_mmss,
         'overall_glide_speed_kmh': int(overall_glide_speed_kmh),
-        'overall_glide_speed_kts': int(overall_glide_speed_kts),     
+        'overall_glide_speed_kts': int(overall_glide_speed_kts),
+        'overall_glide_ias_kmh': int(overall_glide_ias_kmh),
+        'overall_glide_ias_kts': int(overall_glide_ias_kts),
         'glide_distance_km': round(total_glide_distance_km,2),
         'glide_distance_nmi': round(glide_distance_nmi,2)      
         
