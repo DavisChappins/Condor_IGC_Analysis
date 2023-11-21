@@ -6,7 +6,7 @@ import os
 
 
 
-file_name = "US Soaring Q4 2023 Oct Nov Dec-Competition day 13-DC1-256263.igc"
+file_name = "US Soaring Q4 2023 Oct Nov Dec-Competition day 13-JM-256252.igc"
 
 
 print(f'Analyzing "{file_name}"')
@@ -53,6 +53,8 @@ if task_finish_status == 'Task Completed':
 
 
     flight_data = label_thermal_series(flight_data)
+    flight_data = replace_thermal_sequences(flight_data)
+    flight_data = detect_thermal(flight_data)
     flight_data = label_glide_series(flight_data)
 
     #calculate start and finish energy
@@ -167,11 +169,11 @@ if task_finish_status == 'Task Completed':
         csv_writer = csv.writer(csv_file)
 
         # Write the header row
-        csv_writer.writerow(['Glide', 'ld_ratio', 'glide_time_s', 'glide_time_mmss', 'glide_speed_kmh', 'glide_speed_gs_kts', 'glide_distance_km', 'glide_distance_nmi'])
+        csv_writer.writerow(['Glide', 'ld_ratio', 'glide_time_s', 'glide_time_mmss', 'glide_speed_kmh', 'glide_speed_gs_kts', 'glide_distance_km', 'glide_distance_nmi','starting_utc'])
 
         # Write the data rows
         for glide, data in list(glide_info.items())[:-1]:
-            csv_writer.writerow([glide, data['ld_ratio'], data['glide_time_s'], data['glide_time_mmss'], data['glide_speed_kmh'], data['glide_speed_kts'], data['total_distance_km'], data['total_distance_nmi']])
+            csv_writer.writerow([glide, data['ld_ratio'], data['glide_time_s'], data['glide_time_mmss'], data['glide_speed_kmh'], data['glide_speed_kts'], data['total_distance_km'], data['total_distance_nmi'], data['starting_utc']])
 
     print(f'The data has been written to {csv_file_name}.')
 
@@ -189,16 +191,38 @@ if task_finish_status == 'Task Completed':
         csv_writer = csv.writer(csv_file)
 
         # Write the header row
-        csv_writer.writerow(['Thermal', 'average_rate_of_climb_ms', 'average_rate_of_climb_kts', 'thermal_time_s', 'thermal_time_mmss', 'average_speed_kmh', 'average_speed_kts', 'thermal_height_gained_m', 'thermal_height_gained_ft'])
+        csv_writer.writerow(['Thermal', 'average_rate_of_climb_ms', 'average_rate_of_climb_kts', 'thermal_time_s', 'thermal_time_mmss', 'average_speed_kmh', 'average_speed_kts', 'thermal_height_gained_m', 'thermal_height_gained_ft','starting_utc'])
 
         # Write the data rows
         for thermal, data in list(thermal_info.items())[:-1]:
-            csv_writer.writerow([thermal, data['average_rate_of_climb_ms'], data['average_rate_of_climb_kts'], data['thermal_time_s'], data['thermal_time_mmss'], data['average_speed_kmh'], data['average_speed_kts'], data['thermal_height_gained_m'], data['thermal_height_gained_ft']])
+            csv_writer.writerow([thermal, data['average_rate_of_climb_ms'], data['average_rate_of_climb_kts'], data['thermal_time_s'], data['thermal_time_mmss'], data['average_speed_kmh'], data['average_speed_kts'], data['thermal_height_gained_m'], data['thermal_height_gained_ft'], data['starting_utc']])
 
     print(f'The data has been written to {csv_file_name}.')
     
+
+    # WRITE COMBINED INFO
+    csv_file_name = 'sequenceData_'+pilot_id+'.csv'
+
+    # Open the CSV file in write mode
+    with open(csv_file_name, 'w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        #header row
+        csv_writer.writerow(['Sequence', 'ld_ratio', 'glide_speed_gs_kts', 'glide_distance_nmi', 'average_rate_of_climb_kts', 'thermal_height_gained_ft', 'duration_mmss', 'starting_utc'])
+
+        # Write the data rows
+        for glide, data in list(glide_info.items())[:-1]:
+            csv_writer.writerow([glide, data['ld_ratio'], data['glide_speed_kts'], data['total_distance_nmi'], '', '', data['glide_time_mmss'], data['starting_utc']])
+
+        for thermal, data in list(thermal_info.items())[:-1]:
+            csv_writer.writerow([thermal,'','','',data['average_rate_of_climb_kts'], data['thermal_height_gained_ft'], data['thermal_time_mmss'], data['starting_utc']])
     
+    
+    print(f'The data has been written to {csv_file_name}.')
+
+
+    order_csv_by_starting_utc(csv_file_name)
 
 else:
     print(pilot_id,' did not finish the task so this calculation will not run')
+
 
