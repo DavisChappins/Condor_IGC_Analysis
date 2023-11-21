@@ -56,6 +56,8 @@ def add_igc_to_summary(file_name):
         
 
         flight_data = label_thermal_series(flight_data)
+        flight_data = replace_thermal_sequences(flight_data)
+        flight_data = detect_thermal(flight_data)
         flight_data = label_glide_series(flight_data)
 
         #calculate start and finish energy
@@ -105,9 +107,10 @@ def add_igc_to_summary(file_name):
         average_ias_kts = round(average_ias_kmh * 0.539957,2)
         
         #get valid glides (>2km) for counting average, see count_valid_rows function
-        modified_number_of_glides = count_valid_rows(glide_info )
+        #modified_number_of_glides = count_valid_rows(glide_info )
         
-        average_glide_dist_km = glide_info['Overall']['glide_distance_km'] / modified_number_of_glides #number_of_glides
+        #average_glide_dist_km = glide_info['Overall']['glide_distance_km'] / modified_number_of_glides #number_of_glides
+        average_glide_dist_km = glide_info['Overall']['glide_distance_km'] / number_of_glides
         average_glide_dist_nmi = average_glide_dist_km * 0.539957
         average_glide_dist_km = round(average_glide_dist_km,2)
         average_glide_dist_nmi = round(average_glide_dist_nmi,2)
@@ -138,8 +141,7 @@ def add_igc_to_summary(file_name):
         Rule2_ideal_MC_given_avg_ias_kts, Rule1_ideal_ias_given_avg_climb_kts = ideal_MC_given_avg_ias_kts(igc_data, Rule1_glide_avg_ias_kts,Rule2_avg_climb_rate_kts)
 
         #write to summary csv
-        # Specify the CSV file path
-        csv_file_path = "summary.csv"
+
 
         # Define column names and data row
         columns = ["Name",
@@ -162,6 +164,10 @@ def add_igc_to_summary(file_name):
                    task_speed_kmh
                    ]
 
+        #write to summary csv
+        # Specify the CSV file path
+        csv_file_path = "summary.csv"
+
 
         # Check if the file already exists
         file_exists = os.path.exists(csv_file_path)
@@ -175,6 +181,35 @@ def add_igc_to_summary(file_name):
 
             # Write the data row
             writer.writerow(row_data)
+            
+
+        # WRITE COMBINED INFO
+        csv_file_name = 'sequenceData_'+pilot_id+'.csv'
+
+        # Open the CSV file in write mode
+        with open(csv_file_name, 'w', newline='') as csv_file:
+            csv_writer = csv.writer(csv_file)
+            #header row
+            csv_writer.writerow(['Sequence', 'ld_ratio', 'glide_speed_gs_kts', 'glide_distance_nmi', 'average_rate_of_climb_kts', 'thermal_height_gained_ft', 'duration_mmss', 'starting_utc'])
+
+            # Write the data rows
+            try:
+                for glide, data in list(glide_info.items())[:-1]:
+                    csv_writer.writerow([glide, data['ld_ratio'], data['glide_speed_kts'], data['total_distance_nmi'], '', '', data['glide_time_mmss'], data['starting_utc']])
+            except:
+                pass
+            
+            try:
+                for thermal, data in list(thermal_info.items())[:-1]:
+                    csv_writer.writerow([thermal,'','','',data['average_rate_of_climb_kts'], data['thermal_height_gained_ft'], data['thermal_time_mmss'], data['starting_utc']])
+            except:
+                pass
+        
+        print(f'The data has been written to {csv_file_name}.')
+
+
+        order_csv_by_starting_utc(csv_file_name)
+
 
 
     else:
