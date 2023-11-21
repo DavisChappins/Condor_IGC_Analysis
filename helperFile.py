@@ -265,6 +265,31 @@ def analyze_heading_changes(flight_data):
 
     return flight_data
 
+def analyze_heading_changes_old(flight_data):
+    window_size = 10  # Number of records to consider
+
+    for i in range(window_size, len(flight_data)):
+        current_heading_str = flight_data[i][7]
+
+        try:
+            current_heading = int(current_heading_str)
+
+            # Calculate the sum of absolute heading changes over the last window_size records
+            heading_changes_sum = sum(
+                (int(flight_data[j][7]) - int(flight_data[j - 1][7])) % 360 if int(flight_data[j][7]) > int(flight_data[j - 1][7]) else -(int(flight_data[j][7]) - int(flight_data[j - 1][7])) % 360
+                for j in range(i - window_size + 1, i + 1)
+            )
+
+            # Place the sum in flight_data[i][10]
+            flight_data[i][10] = heading_changes_sum
+
+        except ValueError:
+            # Handle the case where conversion to int fails
+            #print(f"Error converting heading values to integers at index {i}")
+            pass
+
+    return flight_data
+
 
 def trim_records_by_task(flight_data):
     task_start_index = None
@@ -285,7 +310,7 @@ def trim_records_by_task(flight_data):
 
 # helperFile.py
 
-def label_thermal_series(flight_data, threshold=80):
+def label_thermal_series_old(flight_data, threshold=80):
     thermal_label = None
     thermal_count = 1
     #####Change threshold to make glide/climb detection more or less sensitive
@@ -303,6 +328,83 @@ def label_thermal_series(flight_data, threshold=80):
             flight_data[i][11] = thermal_label
 
     return flight_data
+
+def label_thermal_series(flight_data, threshold=60, window_size=20):
+    thermal_label = None
+    thermal_count = 1
+
+    for i in range(len(flight_data)):
+        if flight_data[i][10] is not None and flight_data[i][10] > threshold:
+            # Check the condition for the record at index i + window_size
+            if (
+                i + window_size < len(flight_data)
+                and flight_data[i + window_size][10] is not None
+                and flight_data[i + window_size][10] > threshold
+            ):
+                if thermal_label is None:
+                    #thermal_label = f'Thermal{thermal_count}'
+                    flight_data[i][11] = f'Thermal'
+                    thermal_count += 1
+                    #print('flight_data[i]',flight_data[i])
+            else:
+                thermal_label = None
+                for j in range(max(0, i - 8), i):
+                    flight_data[j][11] = ''
+        else:
+            thermal_label = None
+            for j in range(max(0, i - 8), i):
+                flight_data[j][11] = ''
+
+        if thermal_label is not None:
+            flight_data[i][11] = thermal_label
+
+    return flight_data
+
+
+def replace_thermal_sequences(flight_data, replacement_string = 'extended', extension_rows=25):
+    #detect number of seconds to extend by
+    for i in range(len(flight_data)):
+        if flight_data[i][11] == 'Thermal':
+            # Find the end of the sequence
+            end_of_sequence = i + 1
+            while end_of_sequence < len(flight_data) and flight_data[end_of_sequence][11] == 'Thermal':
+                end_of_sequence += 1
+            
+            # Replace the sequence with the replacement string
+            #for j in range(i, end_of_sequence):
+                #flight_data[j][11] = replacement_string
+            
+            # Extend the replacement string for 15 rows after the last 'Thermal'
+            extension_end = min(end_of_sequence + extension_rows, len(flight_data))
+            for j in range(end_of_sequence, extension_end):
+                flight_data[j][11] = replacement_string
+
+    for i in range(len(flight_data)):
+        if flight_data[i][11] == replacement_string:
+            flight_data[i][11] = 'Thermal'
+            
+    return flight_data
+
+
+def detect_thermal(flight_data):
+    count = 0
+    sequence_count = 0
+    for i in range(len(flight_data)):
+        if flight_data[i][11] == 'Thermal':
+            count += 1
+        else:
+            if count > 0:
+                sequence_count += 1
+                for j in range(i-count, i):
+                    flight_data[j][11] += str(sequence_count)
+                count = 0
+    if count > 0:
+        sequence_count += 1
+        for j in range(len(flight_data)-count, len(flight_data)):
+            flight_data[j][11] += str(sequence_count)
+    return flight_data
+
+
 
 def label_glide_series(flight_data):
     glide_count = 1
@@ -430,16 +532,19 @@ def thermal_sequence(thermal_data):
             overall_height_gained += thermal_height_gained_m
             overall_time_s += thermal_time_s
             thermal_time_mmss = convert_seconds_to_mmss(thermal_time_s)
+            
+            utc_of = find_utc_of(thermal_data,key)
 
             thermal_info[key] = {
                 'average_rate_of_climb_ms': round(average_rate_of_climb_ms,2),
                 'average_rate_of_climb_kts': round(average_rate_of_climb_kts,2),
                 'thermal_time_s': int(thermal_time_s),
-                'thermal_time_mmss': thermal_time_s,
+                'thermal_time_mmss': thermal_time_mmss,
                 'average_speed_kmh': int(average_speed_kmh),
                 'average_speed_kts': int(average_speed_kts),
                 'thermal_height_gained_m': int(thermal_height_gained_m),
-                'thermal_height_gained_ft': int(thermal_height_gained_ft)
+                'thermal_height_gained_ft': int(thermal_height_gained_ft),
+                'starting_utc': utc_of
             }
 
     # Calculate Overall Rate of Climb
@@ -561,7 +666,10 @@ def glide_sequence(glide_data):
         glide_time_mmss = convert_seconds_to_mmss(glide_time_s)
         glide_speed_kts = glide_speed_kmh * 0.539957
         glide_ias_kts = glide_ias_kmh * 0.539957
-
+        
+        #print('key',key)
+        utc_of = find_utc_of(glide_data,key)
+        #print('utc_of',utc_of)
 
         glide_info[key] = {
             'ld_ratio': round(ld_ratio,1),
@@ -572,7 +680,8 @@ def glide_sequence(glide_data):
             'glide_ias_kmh': int(glide_ias_kmh),
             'glide_ias_kts': int(glide_ias_kts),
             'total_distance_km': round(total_distance_km,2),
-            'total_distance_nmi': round(total_distance_nmi,2)
+            'total_distance_nmi': round(total_distance_nmi,2),
+            'starting_utc': utc_of
         }
         
         total_glide_time_s += glide_time_s
@@ -615,11 +724,17 @@ def glide_sequence(glide_data):
         'overall_glide_ias_kmh': int(overall_glide_ias_kmh),
         'overall_glide_ias_kts': int(overall_glide_ias_kts),
         'glide_distance_km': round(total_glide_distance_km,2),
-        'glide_distance_nmi': round(glide_distance_nmi,2)      
+        'glide_distance_nmi': round(glide_distance_nmi,2)
         
     }
 
     return glide_info
+
+def find_utc_of(glide_info, target_key):
+    for key, value_list in glide_info.items():
+        for i, inner_list in enumerate(value_list):
+            if inner_list[11] == target_key:
+                return inner_list[1]
 
 
 def extract_task_distance(igc_data):
@@ -816,6 +931,22 @@ def reorder_csv_by_speed(file_path):
 
     print(f"Reordered CSV saved to {file_path}")
     
+def order_csv_by_starting_utc(file_path):
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(file_path)
+
+    # Convert 'starting_utc' to string
+    df['starting_utc'] = df['starting_utc'].astype(str)
+
+    # Add colon to 'starting_utc'
+    df['starting_utc'] = df['starting_utc'].apply(lambda x: x[:2] + ':' + x[2:4] + ':' + x[4:])
+
+    # Sort the DataFrame by 'starting_utc'
+    df = df.sort_values(by='starting_utc')
+
+    # Save the sorted DataFrame back to the CSV file
+    df.to_csv(file_path, index=False)
+
 
 def count_valid_rows(glide_info):
     count = 0
