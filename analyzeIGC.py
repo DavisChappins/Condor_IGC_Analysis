@@ -31,7 +31,12 @@ def add_igc_to_summary(file_name):
 
         # Extract the start time using the new function
         detected_start_time = extract_start_time(igc_data)
-
+        
+        detected_task_time = extract_task_time(igc_data)
+        task_time_hmmss = detected_task_time
+        
+        max_start_height_ft = extract_max_start_height(igc_data)
+        #print('max_start_height',max_start_height)
 
         # Use the new function to calculate distance between fixes and update flight_data
         flight_data = calculate_distance_between_fixes(flight_data)
@@ -50,7 +55,7 @@ def add_igc_to_summary(file_name):
         flight_data = analyze_heading_changes(flight_data)
         
         flight_data = add_calculated_ias(flight_data)
-
+        
         flight_data = trim_records_by_task(flight_data)
         
         
@@ -89,16 +94,39 @@ def add_igc_to_summary(file_name):
 
         #average_rate_of_climb = calculate_average_rate_of_climb(thermal_data['Thermal1'])
         average_rate_of_climb = calculate_average_rate_of_climb_for_all(thermal_data)
+        
+        
         thermal_info = thermal_sequence(thermal_data)
+        #print(thermal_info)
+        total_thermal_time_mmss = "'"+thermal_info['Overall']['overall_time_mmss']
+        
+
+        discarded_thermals, useful_thermals = count_thermal_info(thermal_info)
+        
+        print('number_of_thermals',number_of_thermals)
+        print('useful_thermals',useful_thermals)
+        print('discarded_thermals',discarded_thermals)
+        
+        if number_of_thermals != 0:
+            thermal_discard_percent = int((discarded_thermals / number_of_thermals) * 100)
+        else:
+            thermal_discard_percent = 0
+
+        print('thermal_discard_percent',thermal_discard_percent)
 
         average_altitude_m, average_altitude_ft = calculate_average_altitude(flight_data)
 
 
         glide_info = glide_sequence(glide_data)
+        #print('glide_info-summary-time',glide_info['Overall']['total_glide_time_mmss'])
+        total_glide_time_mmss = "'"+glide_info['Overall']['total_glide_time_mmss']
 
 
         task_distance_km, task_distance_nmi = extract_task_distance(igc_data)
-
+        #print(task_distance_nmi)
+        #print('task_distance_km',task_distance_km)
+        #print(thermal_data)
+        
         #average_ias_kmh = glide_info['Overall']['overall_glide_ias_kmh']
         #average_ias_kts = glide_info['Overall']['overall_glide_ias_kts']
         
@@ -135,33 +163,44 @@ def add_igc_to_summary(file_name):
         #Rule 3 - Shorter Distance
         Rule3_total_glide_distance_nmi = glide_info['Overall']['glide_distance_nmi']
         Rule3_total_glide_more_percent = percent_difference(Rule3_total_glide_distance_nmi,task_distance_nmi)
+        Rule3_total_glide_distance_km = Rule3_total_glide_distance_nmi * 1.852
+        Rule3_total_glide_distance_km = round(Rule3_total_glide_distance_km,2)
         #Rule 4 - Don't put yourself in jail (stay high)
         Rule4_avg_altitude_ft = average_altitude_ft
 
-        Rule2_ideal_MC_given_avg_ias_kts, Rule1_ideal_ias_given_avg_climb_kts = ideal_MC_given_avg_ias_kts(igc_data, Rule1_glide_avg_ias_kts,Rule2_avg_climb_rate_kts)
+        Rule2_ideal_MC_given_avg_ias_kts, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_ias_MC_GR = ideal_MC_given_avg_ias_kts(igc_data, Rule1_glide_avg_ias_kts,Rule2_avg_climb_rate_kts)
+
+        
+        
+        Rule1_glide_ratio_better_actual_MC = round(Rule1_glide_ratio - Rule1_glide_avg_ias_MC_GR,1)
+        
+        #print('Rule1_glide_ratio_better_actual_MC',Rule1_glide_ratio_better_actual_MC)
+        
+        #Rule1_glide_better_actual_MC
+
 
         #write to summary csv
 
 
         # Define column names and data row
         columns = ["Name",
-                   "Rule1_glide_avg_gs_kts", "Rule1_glide_avg_ias_kts", "Rule1_glide_ratio", "Rule1_ideal_MC_ias_given_avg_climb_kts", "Rule1_glide_avg_dist_nmi",
-                   "Rule2_avg_climb_rate_kts", "Rule2_ideal_MC_given_avg_ias_kts",
-                   "Rule3_total_glide_distance_nmi", "Rule3_total_glide_more_percent",
+                   "Rule1_glide_avg_gs_kts", "Rule1_glide_avg_ias_kts", "Rule1_glide_ratio", "Rule1_glide_ratio_better_actual_MC","Rule1_ideal_MC_ias_given_avg_climb_kts", "Rule1_glide_avg_dist_nmi",
+                   "Rule2_avg_climb_rate_kts", "Rule2_actual_MC_given_avg_ias_kts", "Num_useful_thermals", "Num_discarded_thermals_<75s_or_<500ft","Percent_discarded_thermals",
+                   "Rule3_total_glide_distance_km", "Rule3_total_glide_more_percent",
                    "Rule4_avg_altitude_ft",
-                   "start_speed_gs_kts", "start_altitude_ft", "total_energy_start_MJ",
-                   "finish_speed_gs_kts", "finish_altitude_ft", "total_energy_finish_MJ",
-                   "task_speed_kmh"
+                   "start_speed_gs_kts", "start_altitude_ft", 
+                   "finish_speed_gs_kts", "finish_altitude_ft", 
+                   "task_speed_kmh", "task_distance_km","task_time_hmmss", "total_glide_time_mmss", "total_thermal_time_mmss"
                    ]
 
         row_data = [pilot_id,
-                   Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_dist_nmi,
-                   Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts,
-                   Rule3_total_glide_distance_nmi, Rule3_total_glide_more_percent,
+                   Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_dist_nmi,
+                   Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, useful_thermals, discarded_thermals, thermal_discard_percent,
+                   Rule3_total_glide_distance_km, Rule3_total_glide_more_percent,
                    Rule4_avg_altitude_ft,
-                   start_speed_gs_kts, start_altitude_ft, total_energy_start_MJ,
-                   finish_speed_gs_kts, finish_altitude_ft, total_energy_finish_MJ,
-                   task_speed_kmh
+                   start_speed_gs_kts, start_altitude_ft, 
+                   finish_speed_gs_kts, finish_altitude_ft,
+                   task_speed_kmh, task_distance_km, task_time_hmmss, total_glide_time_mmss, total_thermal_time_mmss
                    ]
 
         #write to summary csv
@@ -210,9 +249,18 @@ def add_igc_to_summary(file_name):
 
         order_csv_by_starting_utc(csv_file_name)
 
-
+        return [pilot_id,
+                Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts,
+                Rule1_glide_avg_dist_nmi,Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, Rule3_total_glide_distance_nmi,
+                Rule3_total_glide_more_percent, Rule4_avg_altitude_ft, start_speed_gs_kts, start_altitude_ft,
+                total_energy_start_MJ, max_start_height_ft, finish_speed_gs_kts, finish_altitude_ft, total_energy_finish_MJ,
+                task_speed_kmh, task_time_hmmss, task_distance_km, total_glide_time_mmss, total_thermal_time_mmss]
 
     else:
         print(pilot_id,'did not finish the task so this calculation will not run')
+        
+    return
+        
+    
 
 
