@@ -1,8 +1,6 @@
 # Condor IGC Analysis
 
 Run generateSummary.py to generate summary.csv for all .igc files inside the folder /igcFiles  
-Run analyzeSingleIGC.py to analyze a single .igc file inside / (same location where analyzeSingleIGC.py is located)  
-MC and energy estimations only valid for 18 meter class at the moment  
 All of the data is from task start to task finish
 
 # Summary columns
