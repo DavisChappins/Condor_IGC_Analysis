@@ -5,6 +5,8 @@ from collections import deque
 from datetime import datetime, timedelta
 import csv
 import pandas as pd
+import os
+import glob
 
 
 def convert_seconds_to_mmss(overall_time_s):
@@ -165,7 +167,39 @@ def add_calculated_ias(flight_data):
         flight_data[i][13] = int(calculated_ias)
 
     return flight_data
-        
+
+def count_thermal_info(thermal_info):
+    # Initialize counters
+    discard_time = 75 #seconds
+    discard_count = 0
+    useful_count = 0
+    altitude_gain_threshold = 500 #ft
+    
+    # Iterate through the keys in thermal_info
+    for key in thermal_info:
+        # Check if the key is valid and has 'thermal_time_s'
+        if isinstance(thermal_info[key], dict) and 'thermal_time_s' in thermal_info[key]:
+            # Check if thermal_time_s is less than discard_time
+            if thermal_info[key]['thermal_time_s'] < discard_time and thermal_info[key]['thermal_height_gained_ft'] < altitude_gain_threshold:
+                discard_count += 1
+            else:
+                useful_count += 1
+    
+    # Return the counts
+    return discard_count, useful_count
+
+
+def extract_max_start_height(igc_data):
+    # Extract the start time from igc_data
+    detected_max_start_height_m = None
+    for line in igc_data:
+        if line.startswith("LCONFPLTPAltitude1="):
+            detected_max_start_height_m = line.split("=")[1].replace(":", "")
+            break
+    detected_max_start_height_ft = float(detected_max_start_height_m) * 3.28084
+    detected_max_start_height_ft = int(detected_max_start_height_ft)
+
+    return detected_max_start_height_ft
 
 def extract_start_time(igc_data):
     # Extract the start time from igc_data
@@ -176,6 +210,20 @@ def extract_start_time(igc_data):
             break
 
     return detected_start_time
+
+
+def extract_task_time(igc_data):
+    detected_task_time = None
+    for line in igc_data:
+        if line.startswith("LCONFlightInfoTaskTime="):
+            task_time_str = line.split("=")[1].strip()  # Extract the task time string
+            # Convert task time string to timedelta
+            task_time_delta = datetime.strptime(task_time_str, "%H:%M:%S") - datetime.strptime("00:00:00", "%H:%M:%S")
+            # Format timedelta as HH:MM:SS
+            detected_task_time = str(task_time_delta)
+            break
+
+    return detected_task_time
 
 def find_and_set_task_start(flight_data, detected_start_time):
     # Find the matching record in flight_data and set 'TaskStart' in flight_data[i][11]
@@ -427,9 +475,12 @@ def calculate_total_energy(flight_data):
 
     # Calculate for TaskStart (first row)
     h_start = float(flight_data[0][5])  # altitude in meters
+    #print('h_start',h_start)
     v_kmh_start = float(flight_data[0][9])  # groundspeed in km/h
+    #print('v_kmh_start',v_kmh_start)
     v_ms_start = v_kmh_start / 3.6  # Convert groundspeed to m/s
     total_energy_start = int(m * g * h_start + 0.5 * m * v_ms_start ** 2)
+    #print(total_energy_start)
 
     # Calculate for TaskFinish (last row)
     h_finish = float(flight_data[-1][5])  # altitude in meters
@@ -551,7 +602,7 @@ def thermal_sequence(thermal_data):
     if overall_time_s != 0:
         overall_rate_of_climb_ms = round(overall_height_gained / overall_time_s, 2)
     else:
-        overall_rate_of_climb_ms = None
+        overall_rate_of_climb_ms = 0
         
     overall_rate_of_climb_kts = overall_rate_of_climb_ms * 1.94384
     overall_time_mmss = convert_seconds_to_mmss(overall_time_s)
@@ -566,6 +617,98 @@ def thermal_sequence(thermal_data):
     
     return thermal_info
 
+
+
+def angular_difference_deg(a, b):
+    return (a - b + 180) % 360 - 180
+
+def thermal_sequence_with_bank_and_radius(thermal_data, thermal_radius=100):
+    thermal_info = {}
+    overall_height_gained = 0
+    overall_time_s = 0
+
+    for key, data in thermal_data.items():
+        if not data:
+            print(f"No data for {key}.")
+            thermal_info[key] = None
+        else:
+            # Extract altitude, time, speed, and heading data from thermal_data[key]
+            altitudes = [row[5] for row in data]
+            times = list(range(len(data)))
+            speeds_kmh = [row[9] for row in data]
+            headings_deg = [row[7] for row in data]
+
+            # Calculate average rate of climb
+            if times[-1] != 0:
+                average_rate_of_climb_ms = round((float(altitudes[-1]) - float(altitudes[0])) / times[-1], 2)
+            else:
+                average_rate_of_climb_ms = .00001
+
+            # Calculate thermal time
+            thermal_time_s = len(data)
+
+            # Calculate thermal speed
+            average_speed_kmh = sum(speeds_kmh) / len(speeds_kmh)
+
+            # Calculate rate of change of heading for each step
+            delta_headings_deg = [angular_difference_deg(headings_deg[i], headings_deg[i - 1]) for i in range(1, len(headings_deg))]
+            
+            # Calculate average rate of change of heading
+            average_rate_of_change_of_heading_deg_per_s = sum(delta_headings_deg) / thermal_time_s
+
+            print('average_rate_of_change_of_heading_deg_per_s',average_rate_of_change_of_heading_deg_per_s)
+            
+            # Calculate bank angle
+            g = 9.81  # acceleration due to gravity in m/s^2
+            bank_angle_rad = math.atan((rate_of_change_of_heading_deg_per_s * average_speed_kmh) / g)
+            average_bank_angle = math.degrees(bank_angle_rad)
+
+            # Calculate thermal height gained
+            thermal_height_gained_m = float(altitudes[-1]) - float(altitudes[0])
+            thermal_height_gained_ft = thermal_height_gained_m * 3.28084
+
+            overall_height_gained += thermal_height_gained_m
+            overall_time_s += thermal_time_s
+            thermal_time_mmss = convert_seconds_to_mmss(thermal_time_s)
+
+            utc_of = find_utc_of(thermal_data, key)
+
+            thermal_info[key] = {
+                'average_rate_of_climb_ms': round(average_rate_of_climb_ms, 2),
+                'average_rate_of_climb_kts': round(average_rate_of_climb_ms * 1.94384, 2),
+                'thermal_time_s': int(thermal_time_s),
+                'thermal_time_mmss': thermal_time_mmss,
+                'average_speed_kmh': int(average_speed_kmh),
+                'average_speed_kts': int(average_speed_kmh * 0.539957),
+                'average_bank_angle': round(average_bank_angle, 2),
+                'thermal_height_gained_m': int(thermal_height_gained_m),
+                'thermal_height_gained_ft': int(thermal_height_gained_ft),
+                'starting_utc': utc_of,
+                'thermal_radius_m': thermal_radius
+            }
+
+    return thermal_info
+
+"""
+    # Calculate Overall Rate of Climb
+    if overall_time_s != 0:
+        overall_rate_of_climb_ms = round(overall_height_gained / overall_time_s, 2)
+    else:
+        overall_rate_of_climb_ms = 0
+        
+    overall_rate_of_climb_kts = overall_rate_of_climb_ms * 1.94384
+    overall_time_mmss = convert_seconds_to_mmss(overall_time_s)
+
+    thermal_info['Overall'] = {
+        'overall_rate_of_climb_ms': round(overall_rate_of_climb_ms,2),
+        'overall_rate_of_climb_kts': round(overall_rate_of_climb_kts,2),
+        'overall_time_s': overall_time_s,
+        'overall_time_mmss':overall_time_mmss
+    }
+    
+    
+    return thermal_info
+"""
 
 def calculate_total_distance_between_fixes(fix1, fix2):
     lat1, lon1 = convert_lat_lon_to_decimal(fix1[2], fix1[3])
@@ -599,7 +742,8 @@ def calculate_haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def glide_sequence(glide_data):
-    if not glide_data or len(glide_data) < 2:
+    #print('len(glide_data)',len(glide_data))
+    if not glide_data or len(glide_data) < 1:
         print("Insufficient data for L/D ratio calculation.")
         return None
 
@@ -683,6 +827,7 @@ def glide_sequence(glide_data):
             'total_distance_nmi': round(total_distance_nmi,2),
             'starting_utc': utc_of
         }
+        #print('glide_info',glide_info)
         
         total_glide_time_s += glide_time_s
         total_glide_distance += total_distance
@@ -825,7 +970,7 @@ def MC_lookup(airspeed, MC_table):
 def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
     #find glider class in igc file
     for line in igc_data:
-        if 'LCONFPLClass=' in line:
+        if 'LCONFPLName=' in line:
             # Find the index of '=' and return the substring after it
             index = line.index('=')
             glider_class =  line[index + 1:].strip()
@@ -859,6 +1004,7 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
         if current_diff < closest_diff:
             closest_diff = current_diff
             closest_row_airspeed = row
+            #print('closest_row_airspeed',closest_row_airspeed)
             
     # Initialize variables to keep track of the closest match
     closest_diff = float('inf')
@@ -871,7 +1017,7 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
             closest_diff = current_diff
             closest_row_climbrate = row    
 
-    return float(closest_row_airspeed[0]), int(closest_row_climbrate[1])
+    return float(closest_row_airspeed[0]), float(closest_row_climbrate[1]), float(closest_row_airspeed[2])
 
 def get_pilot_cn_and_name(igc_data):
     pilot_name = None
@@ -901,6 +1047,7 @@ def find_task_speed(igc_data):
             
     return task_speed
 
+
 def determine_if_task_completed(igc_data):
     
     for line in igc_data:
@@ -929,7 +1076,7 @@ def reorder_csv_by_speed(file_path):
     # Save the reordered DataFrame to a new CSV file
     df.to_csv(file_path, index=False)
 
-    print(f"Reordered CSV saved to {file_path}")
+    print(f"Reordered CSV saved to {file_path} based on Rank")
     
 def order_csv_by_starting_utc(file_path):
     # Read the CSV file into a DataFrame
@@ -954,3 +1101,18 @@ def count_valid_rows(glide_info):
         if key != 'Overall' and value['total_distance_km'] > 2:
             count += 1
     return count
+
+def delete_csv_files_with_prefix(prefix):
+    # Create a pattern to match CSV files starting with the specified prefix
+    pattern = f'{prefix}*.csv'
+
+    # Use glob to find all matching files
+    files_to_delete = glob.glob(pattern)
+
+    # Delete each matching file
+    for file_path in files_to_delete:
+        try:
+            os.remove(file_path)
+            print(f"Deleted: {file_path}")
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
