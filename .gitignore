@@ -1,5 +1,5 @@
-./igcFiles
-./sequence*
-./summary.csv
+igcFiles
+sequence*
+summary.csv
 __pycache__
 env
