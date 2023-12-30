@@ -51,7 +51,7 @@ detailed_summary_list = []
 header_row = ['pilot_id',
                 'Rule1_glide_avg_gs_kts', 'Rule1_glide_avg_ias_kts', 'Rule1_glide_ratio', 'Rule1_glide_ratio_better_actual_MC','Rule1_ideal_ias_given_avg_climb_kts',
                 'Rule1_glide_avg_dist_nmi', 'Rule2_avg_climb_rate_kts', 'Rule2_ideal_MC_given_avg_ias_kts', 'Rule3_total_glide_distance_nmi',
-                'Rule3_total_glide_more_percent', 'Rule4_avg_altitude_ft', 'start_speed_gs_kts', 'start_altitude_ft',
+                'Rule3_total_glide_more_percent', 'Rule4_avg_altitude_ft', 'start_speed_gs_kts', 'start_altitude_ft', 'start_time',
                 'total_energy_start_MJ', 'finish_speed_gs_kts', 'finish_altitude_ft', 'total_energy_finish_MJ',
                 'task_speed_kmh','task_speed_kmh', 'task_time_hmmss', 'task_distance_km', 'total_glide_time_mmss', 'total_thermal_time_mmss']
 
@@ -84,7 +84,7 @@ if AAT == 1:
 elif AAT == 0:
     Task_time_behind_rank1(file_path)
 
-#add time behidn rank 1 for gliding performance
+#add time behind rank 1 for gliding performance
 Rule1_add_time_delta(file_path)
 
 #add time delta from best climb
@@ -95,7 +95,7 @@ Rule2_add_time_delta(file_path)
 #do time lost analysis, rule 3
 Rule3_add_time_delta(file_path)
 
-
+Rule4_add_leeching_stats(file_path)
 
 #max_start_height_ft = detailed_summary[15]
 #mass_kg = 600 #18m is 600, 15m is 500, club is 250 

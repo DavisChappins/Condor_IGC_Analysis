@@ -1,6 +1,75 @@
 import csv
 from datetime import datetime
 
+def Rule4_add_leeching_stats(csv_file_path):
+    #  We will assume flights never span midnight, because... that would be madness and I'm lazy :-).
+   
+    min_time = datetime.strptime('23:59:59','%H:%M:%S')
+    max_time = datetime.strptime('00:00:00','%H:%M:%S')
+    with open(csv_file_path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            start_time = datetime.strptime(row['start_time'],'%H:%M:%S')
+            if start_time < min_time:
+                min_time = start_time
+            if max_time < start_time:
+                max_time = start_time
+    #print(f"Min start time = {min_time}.  Max start time = {max_time}")
+    #  Loop again, but this time record our deltas...
+    behind_ahead = []
+    with open(csv_file_path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            start_time = datetime.strptime(row['start_time'],'%H:%M:%S')
+            # subtracting times give a timedelta, which always prints as hh:mm:ss.
+            # strftime isn't available, so hack this by converting to string and grabbing last 5
+            # this will not display correctly if the time delta is > 1 hour.
+            delta_behind_first_starter = f"{start_time - min_time}"[-5:]
+            delta_before_last_starter = f"{max_time - start_time}"[-5:]
+            behind_ahead.append([delta_behind_first_starter, delta_before_last_starter])
+
+    # Initialize an empty list to store the data
+    summary = []
+
+    # Open the CSV file and read its contents
+    with open(csv_file_path, 'r') as csvfile:
+        # Create a CSV reader object
+        csv_reader = csv.reader(csvfile)
+
+        # Read the header row to get the keys
+        header = next(csv_reader, None)
+
+        # Check if the header row exists
+        if header:
+            # Iterate through each row in the CSV file
+            for row in csv_reader:
+                # Create a dictionary for each row using the header as keys
+                row_dict = dict(zip(header, row))
+
+                # Append the dictionary to the list
+                summary.append(row_dict)
+
+    new_header = ['Rule4_time_delta_behind_first_starter_mmss', 'Rule4_time_delta_before_last_starter_mmss']
+    # Read the existing CSV file
+    with open(csv_file_path, 'r') as file:
+        reader = csv.reader(file)
+        rows = list(reader)
+
+    # Add the new header to the end of the existing header row
+    header_row = rows[0]
+    for i in range(len(new_header)):
+        header_row.append(f'{new_header[i]}')
+
+    for i in range(len(rows) - 1):  # Assuming the lengths of the data lists match the number of rows
+        rows[i + 1].append(behind_ahead[i][0])
+        rows[i + 1].append(behind_ahead[i][1])
+
+    # Write the updated rows back to the CSV file
+    with open(csv_file_path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerows(rows)
+
+    print(f"Added {new_header}")
 
 def Rule3_add_time_delta(csv_file_path):
     # Convert task_distance_km to nautical miles using the conversion factor
