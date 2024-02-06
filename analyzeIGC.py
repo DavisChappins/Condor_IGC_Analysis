@@ -24,11 +24,11 @@ def add_igc_to_summary(file_name):
 
     if task_finish_status == 'Task Completed':
             
-
+        
         task_speed_kmh = find_task_speed(igc_data)
         task_speed_kts = round(task_speed_kmh * 0.539957,2)
-
-
+        
+        
         # Extract the start time using the new function
         detected_start_time = extract_start_time(igc_data)
         
@@ -45,7 +45,7 @@ def add_igc_to_summary(file_name):
         flight_data = calculate_heading_between_fixes(flight_data)
 
         flight_data = calculate_groundspeed(flight_data)
-
+        
         # Set 'TaskStart' in flight_data
         flight_data = find_and_set_task_start(flight_data, detected_start_time)
 
@@ -91,7 +91,7 @@ def add_igc_to_summary(file_name):
         number_of_glides = len(glide_data)
 
 
-
+        
         #average_rate_of_climb = calculate_average_rate_of_climb(thermal_data['Thermal1'])
         average_rate_of_climb = calculate_average_rate_of_climb_for_all(thermal_data)
         
@@ -100,6 +100,30 @@ def add_igc_to_summary(file_name):
         #print(thermal_info)
         total_thermal_time_mmss = "'"+thermal_info['Overall']['overall_time_mmss']
         
+
+        #experimental netto stuff
+        calculate_height_difference(flight_data)
+        calculate_sink_rate(flight_data)
+        calculate_glide_ratio(flight_data)
+        calculate_ias_kt(flight_data)
+        calculate_MC_equivalent(flight_data, igc_data)
+        calculate_netto(flight_data)
+        calculate_netto_positive_instances(flight_data)
+        netto_positive_count = count_netto_positive_instances(flight_data) # count the number of seconds that the glider is netto positive IN GLIDE
+        calculate_glide_positive_instances(flight_data)
+        sinkrate_positive_count = count_glide_positive_isntances(flight_data) # count the number of seconds that the glider is sinkrate positive IN GLIDE
+        
+        avg_netto_kt = calculate_average_netto(flight_data)
+        
+
+        calculate_energy(flight_data)
+        calculate_total_energy_difference(flight_data)
+        
+        percent_glide_netto_positive = calculate_percent_glide_positive_netto(flight_data)
+        percent_glide_sinkrate_positive = calculate_percent_glide_positive_sinkrate(flight_data)
+        
+        
+         #
 
         discarded_thermals, useful_thermals = count_thermal_info(thermal_info)
         
@@ -185,6 +209,7 @@ def add_igc_to_summary(file_name):
         # Define column names and data row
         columns = ["Name",
                    "Rule1_glide_avg_gs_kts", "Rule1_glide_avg_ias_kts", "Rule1_glide_ratio", "Rule1_glide_ratio_better_actual_MC","Rule1_ideal_MC_ias_given_avg_climb_kts", "Rule1_glide_avg_dist_nmi",
+                   "Rule1_avg_glide_netto_kt", "Rule1_%_of_glide_netto_positive", "Rule1_%_of_glide_sinkrate_positive",
                    "Rule2_avg_climb_rate_kts", "Rule2_actual_MC_given_avg_ias_kts", "Num_useful_thermals", "Num_discarded_thermals_<75s_or_<500ft","Percent_discarded_thermals",
                    "Rule3_total_glide_distance_km", "Rule3_total_glide_more_percent",
                    "Rule4_avg_altitude_ft",
@@ -195,6 +220,7 @@ def add_igc_to_summary(file_name):
 
         row_data = [pilot_id,
                    Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_dist_nmi,
+                   avg_netto_kt, percent_glide_netto_positive, percent_glide_sinkrate_positive,
                    Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, useful_thermals, discarded_thermals, thermal_discard_percent,
                    Rule3_total_glide_distance_km, Rule3_total_glide_more_percent,
                    Rule4_avg_altitude_ft,
