@@ -22,7 +22,34 @@ def process_igc_data(igc_data):
     flight_data = [line for line in igc_data if line.startswith('B')]
 
     # Add column names at index 0
-    column_names = ["record", "timeutc", "latitude", "longitude", "validity", "pressAlt", "gnssAlt", "heading", "distance", "groundspeed", "headingChange","glideOrThermal", "task","indicatedairspeed"]
+    column_names = ["record",
+                    "timeutc",
+                    "latitude",
+                    "longitude",
+                    "validity",
+                    "pressAlt",
+                    "gnssAlt",
+                    "heading",
+                    "distance",
+                    "groundspeed",
+                    "headingChange",
+                    "glideOrThermal",
+                    "task",
+                    "indicatedairspeed",
+                    "height_change_ft",
+                    "sinkrate_kt",
+                    "LD",
+                    "IAS_kt",
+                    "MC_LD_at_IAS_kt",
+                    "MC_sinkrate_at_IAS_kt",
+                    "netto_kt",
+                    "bool_netto_positive",
+                    "bool_sinkrate_positive",
+                    "PE_J",
+                    "KE_J",
+                    "TE_J",
+                    "TE_diff_from_last_J"
+                    ]
     flight_data.insert(0, column_names)
 
     # Split each row into specified columns
@@ -44,8 +71,49 @@ def process_igc_data(igc_data):
         glide_or_thermal = ""  # You can replace this with the actual values
         task = ""  # You can replace this with the actual values
         indicatedairspeed = ""
+        height_change_ft = ""
+        sinkrate_kt = ""
+        IAS_kt = ""
+        LD = ""
+        MC_LD_at_IAS_kt = ""
+        MC_sinkrate_at_IAS_kt = ""
+        netto_kt = ""
+        bool_netto_positive = 0
+        bool_sinkrate_positive = 0
+        PE_J = ""
+        KE_J = ""
+        TE_J = ""
+        TE_diff_from_last_J = ""
+        
 
-        flight_data[index] = [record, timeutc, latitude, longitude, validity, pressAlt, gnssAlt, heading, distance, groundspeed, headingChange, glide_or_thermal, task, indicatedairspeed]
+        flight_data[index] = [record,
+                              timeutc,
+                              latitude,
+                              longitude,
+                              validity,
+                              pressAlt,
+                              gnssAlt,
+                              heading,
+                              distance,
+                              groundspeed,
+                              headingChange,
+                              glide_or_thermal,
+                              task,
+                              indicatedairspeed,
+                              height_change_ft,
+                              sinkrate_kt,
+                              LD,
+                              IAS_kt,
+                              MC_LD_at_IAS_kt,
+                              MC_sinkrate_at_IAS_kt,
+                              netto_kt,
+                              bool_netto_positive,
+                              bool_sinkrate_positive,
+                              PE_J,
+                              KE_J,
+                              TE_J,
+                              TE_diff_from_last_J
+                              ]
 
     return flight_data
 
@@ -163,8 +231,9 @@ def add_calculated_ias(flight_data):
             calculated_ias = calculate_indicated_airspeed(float(flight_data[i][9]),float(flight_data[i][5]))
         except:
             pass
+        calculated_ias = round(calculated_ias,2)
         
-        flight_data[i][13] = int(calculated_ias)
+        flight_data[i][13] = calculated_ias
 
     return flight_data
 
@@ -521,6 +590,302 @@ def extract_specific_labels(flight_data):
                 thermal_data[label].append(row.copy())
 
     return glide_data, thermal_data
+
+
+def calculate_height_difference(flight_data):
+    # Start from index 1 to avoid index out of range error
+    for i in range(1, len(flight_data)):
+        # Calculate the difference in height
+        height_difference_in_meters = float(flight_data[i][5]) - float(flight_data[i - 1][5])
+        
+        # Convert the height difference to feet (1 meter = 3.28084 feet)
+        height_difference_in_feet = height_difference_in_meters * 3.28084
+        height_difference_in_feet = round(height_difference_in_feet,4)
+        
+        # Store the result in flight_data[i][14]
+        flight_data[i][14] = str(height_difference_in_feet)
+
+def calculate_sink_rate(flight_data):
+    # Start from index 1 to avoid index out of range error
+    for i in range(1, len(flight_data)):
+        # Calculate the change in height in feet
+        change_in_height_m = float(flight_data[i][5]) - float(flight_data[i - 1][5])
+        change_in_height_ft = change_in_height_m * 3.28084
+        # Calculate the sink rate in feet per second
+        sink_rate_fps = change_in_height_ft / 1  # Assuming each step is 1 second
+        
+        # Convert the sink rate to knots (1 knot = 1.68781 feet per second)
+        sink_rate_kts = sink_rate_fps / 1.68781
+        
+        sink_rate_kts = round(sink_rate_kts,4)
+        
+        # Store the sink rate in flight_data[i][15]
+        flight_data[i][15] = str(sink_rate_kts)
+
+def calculate_glide_ratio(flight_data):
+    # Start from index 1 to avoid index out of range error
+    for i in range(1, len(flight_data)):
+        # Calculate the change in distance in meters
+        change_in_distance = float(flight_data[i][8])
+        
+        # Calculate the change in height in meters
+        change_in_height = float(flight_data[i][5]) - float(flight_data[i - 1][5])
+        
+        # Calculate glide ratio (LD)
+        if change_in_height != 0:  # Avoid division by zero
+            glide_ratio = change_in_distance / change_in_height
+        else:
+            glide_ratio = float(-10000)  # Set to a high number if change in height is zero
+        
+        glide_ratio = glide_ratio * -1 # positive glide ratio is down
+        glide_ratio = round(glide_ratio,2)
+            
+        # Store the glide ratio in flight_data[i][16]
+        flight_data[i][16] = str(glide_ratio)
+
+
+def calculate_ias_kt(flight_data):
+    # Start from index 1 to avoid index out of range error
+    for i in range(1, len(flight_data)):
+        ias_kmh = float(flight_data[i][13])
+        ias_kt = ias_kmh * 0.539957
+        
+        ias_kt = round(ias_kt,2)
+        
+        flight_data[i][17] = str(ias_kt)
+
+
+def calculate_MC_equivalent(flight_data, igc_data):
+    #find glider class in igc file
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            # Find the index of '=' and return the substring after it
+            index = line.index('=')
+            glider_class =  line[index + 1:].strip()
+        
+            # Append '.csv' onto the end of the result
+            glider_class += '.csv'
+            #print(glider_class)
+            
+            #return result
+    #use glider_class in csv lookup
+    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
+    MC_table = []
+
+    with open(file_path, 'r') as file:
+        csv_reader = csv.reader(file)
+        for row in csv_reader:
+            MC_table.append(row)
+    #print(MC_table)
+    
+    #use MC_table to lookup
+    for i in range(1, len(flight_data)):
+        # Assuming IAS_kt is at index 17 in each sublist of flight_data
+        ias_kt = flight_data[i][17]
+
+        # Convert IAS_kt to float for comparison
+        ias_kt = float(ias_kt)
+
+        # Initialize variables to keep track of the closest match
+        closest_diff = float('inf')
+        closest_row = None
+
+        # Iterate through MC_table starting from the second row (index 1) for airspeed
+        for row in MC_table[1:]:
+            current_diff = abs(ias_kt - float(row[1]))
+            if current_diff < closest_diff:
+                closest_diff = current_diff
+                closest_row = row
+
+        # Update flight_data with the MC LD value    
+        flight_data[i][18] = closest_row[2]
+        
+        # Update flight_data with the MC sinkrate value    
+        flight_data[i][19] = closest_row[3]
+    
+def calculate_netto(flight_data):
+    for i in range(2, len(flight_data)):
+        # Check if flight_data[i][11] contains "Glide"
+        if "Glide" in flight_data[i][11]:
+            # Assuming flight_data[i][15] is sinkrate_kt and flight_data[i][19] is sinkrate_MC_at_ias_kt
+            sinkrate_kt = float(flight_data[i][15])
+            sinkrate_MC_at_ias_kt = float(flight_data[i][19]) ### error here means no csv file format correct
+
+            # Check if both sinkrate_kt and sinkrate_MC_at_ias_kt are not None
+            if sinkrate_kt is not None and sinkrate_MC_at_ias_kt is not None:
+                # Subtract sinkrate_MC_at_ias_kt from sinkrate_kt to get netto_kt
+                netto_kt = sinkrate_kt - sinkrate_MC_at_ias_kt
+                netto_kt = round(netto_kt,3)
+
+                # Write netto_kt to flight_data[i][20]
+                flight_data[i][20] = str(netto_kt)
+
+def calculate_netto_positive_instances(flight_data):
+    #count the number of seconds that the glider is netto positive IN GLIDE ONLY
+    #netto_count = 0
+    for i in range(2,len(flight_data)):
+        # Check if flight_data[i][11] contains "Glide"
+        if "Glide" in flight_data[i][11]:
+            # Assuming flight_data[i][20] is netto_kt
+            netto_kt = float(flight_data[i][20])
+
+            # Check if netto_kt is not None and is greater than 0
+            if netto_kt is not None and netto_kt != '' and netto_kt > 0:
+                # Increment count_netto_positive for this instance
+                flight_data[i][21] = 1 
+
+
+
+def count_netto_positive_instances(flight_data):
+    #count the number of seconds that the glider is netto positive IN GLIDE ONLY
+    netto_count = 0
+    for i in range (2, len(flight_data)):
+        if "Glide" in flight_data[i][11] and flight_data[i][21] == 1:
+           netto_count = netto_count + 1
+           #print(i)
+           #print('netto_count',netto_count)
+    return netto_count
+           
+       
+           
+       
+        
+def calculate_glide_positive_instances(flight_data):
+    #count the number of seconds that the glider is sinkrate positive IN GLIDE ONLY
+    for i in range(2, len(flight_data)):
+        if "Glide" in flight_data[i][11]:
+            sinkrate_kt = float(flight_data[i][15])
+            #print('sinkrate_kt',sinkrate_kt)
+            
+            if sinkrate_kt is not None and sinkrate_kt != '' and sinkrate_kt > 0:
+                flight_data[i][22] = 1
+                #print(i)
+                
+                
+def count_glide_positive_isntances(flight_data):
+    sinkrate_positive_count = 0
+    for i in range(2, len(flight_data)):
+        if "Glide" in flight_data[i][11] and flight_data[i][22] == 1:
+            sinkrate_positive_count = sinkrate_positive_count + 1
+    return sinkrate_positive_count
+       
+
+
+def calculate_average_netto(flight_data):
+    # Initialize variables to keep track of count and sum
+    count_netto = 0
+    sum_netto = 0
+
+    for i in range(2,len(flight_data)):
+        #print(i)
+        # Assuming flight_data[i][20] is netto_kt
+        if "Glide" in flight_data[i][11]:
+            netto_kt = float(flight_data[i][20])
+            #print(i)
+            #print('netto_kt',netto_kt)
+            # Check if netto_kt is not None
+            count_netto += 1
+            sum_netto += netto_kt
+                
+
+        # Calculate average netto if there are instances
+        if count_netto > 0:
+            average_netto = sum_netto / count_netto
+        else:
+            average_netto = None
+    average_netto = round(average_netto,2)
+    
+    return average_netto
+
+
+
+def calculate_percent_glide_positive_netto(flight_data):
+    # Initialize variables to keep track of count
+    count_glide_positive_netto = 0
+    count_glide_instances = 0
+
+    for i in range(2, len(flight_data)):
+        # Check if flight_data[i][11] contains "glide"
+        if "Glide" in flight_data[i][11]:
+            count_glide_instances += 1
+
+            # Check if flight_data[i][21] is 1
+            if flight_data[i][21] == 1 and flight_data[i][26] > 0: #[26] ensures TE increasing
+                count_glide_positive_netto += 1
+
+    # Calculate the percentage if there are glide instances
+    percent_glide_positive_netto = (count_glide_positive_netto / count_glide_instances) * 100 if count_glide_instances > 0 else None
+    
+    percent_glide_positive_netto = int(round(percent_glide_positive_netto,0))
+    
+    return percent_glide_positive_netto
+
+
+def calculate_percent_glide_positive_sinkrate(flight_data):
+    # Initialize variables to keep track of count
+    count_glide_positive_sinkrate = 0
+    count_glide_instances = 0
+
+    for i in range(2, len(flight_data)):
+        # Check if flight_data[i][11] contains "glide"
+        if "Glide" in flight_data[i][11]:
+            count_glide_instances += 1
+
+            # Check if flight_data[i][22] is 1
+            if flight_data[i][22] == 1 and flight_data[i][26] > 0: #[26] ensures TE increasing
+                count_glide_positive_sinkrate += 1
+
+    # Calculate the percentage if there are glide instances
+    percent_glide_positive_sinkrate = (count_glide_positive_sinkrate / count_glide_instances) * 100 if count_glide_instances > 0 else None
+    
+    percent_glide_positive_sinkrate = int(round(percent_glide_positive_sinkrate,0))
+    
+    return percent_glide_positive_sinkrate   
+
+
+
+def calculate_energy(flight_data):
+    # Constants
+    mass = 550  # kg, assuming a constant mass
+
+    for i in range(len(flight_data)):
+        # Conversion factor for speed from km/h to m/s
+        speed_kmh = float(flight_data[i][13])
+        speed_ms = speed_kmh * (1000 / 3600)  # Conversion from km/h to m/s
+
+        # Kinetic energy calculation: KE = 0.5 * m * v^2
+        kinetic_energy = 0.5 * mass * speed_ms ** 2
+
+        # Potential energy calculation: PE = m * g * h
+        altitude = float(flight_data[i][5])
+        gravitational_acceleration = 9.81  # m/s^2, standard gravitational acceleration on Earth
+        potential_energy = mass * gravitational_acceleration * altitude
+
+        # Total energy calculation: TE = KE + PE
+        total_energy = kinetic_energy + potential_energy
+
+        # Update flight_data with calculated kinetic, potential, and total energy
+        flight_data[i][24] = int(kinetic_energy)
+        flight_data[i][23] = int(potential_energy)
+        flight_data[i][25] = int(total_energy)
+
+
+def calculate_total_energy_difference(flight_data):
+    # Assuming flight_data is a list of lists where each sublist represents flight information
+    # e.g., flight_data = [[...], [...], ...]
+    compensation_factor = 1.00 #TE decays because of glide ratio (height loss) at constant speed
+
+    for i in range(2, len(flight_data)):
+        # Accessing total energy values for the current and previous entries
+        total_energy_current = float(flight_data[i][25])
+        total_energy_previous = float(flight_data[i - 1][25])
+
+        # Calculate the total energy difference
+        total_energy_difference = (compensation_factor * total_energy_current - total_energy_previous)
+
+        # Update flight_data with the total energy difference
+        flight_data[i][26] = int(total_energy_difference)
+
 
 
 def calculate_average_rate_of_climb_for_all(thermal_data):
@@ -925,6 +1290,8 @@ def calculate_average_altitude(flight_data):
 
 def percent_difference(value1, value2):
     diff = round(abs((value1 - value2) / ((value1 + value2) / 2)) * 100,2)
+    if value1 < value2:
+        diff = diff * -1
     return diff
 
 

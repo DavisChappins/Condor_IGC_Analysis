@@ -101,4 +101,3 @@ Rule3_add_time_delta(file_path)
 #mass_kg = 600 #18m is 600, 15m is 500, club is 250 
 
 
-
