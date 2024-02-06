@@ -42,17 +42,30 @@ def Rule3_add_time_delta(csv_file_path):
 
         # Calculate remaining distance
         remaining_distance = float(total_distance) - float(task_distance_km)
-
+        #print('total_distance',total_distance)
+        #print('task_distance_km',task_distance_km)
+        #print('remaining_distance',remaining_distance)
         # Calculate time in seconds
         time_seconds = (remaining_distance / float(speed)) * 3600
+        #print('time_seconds',time_seconds)
+        
+        is_negative = time_seconds < 0
+        
+        time_seconds = abs(time_seconds)
+        
         # Convert time to MM:SS format
         minutes = int(time_seconds // 60)
         seconds = int(time_seconds % 60)
         time_str = f"{minutes:02}:{seconds:02}"
-
+        
+        if is_negative:
+            time_str = "-" + time_str
+        #print('DEBUG FOR TIME LOST')
         # Store the results in lists
         rule3_absolute_time_sec.append(str(int(time_seconds)))
+        #print('rule3_absolute_time_sec',rule3_absolute_time_sec)
         rule3_absolute_time_lost_mmss.append(time_str)
+        #print('rule3_absolute_time_lost_mmss',rule3_absolute_time_lost_mmss)
 
         # Update smallest_time_seconds
         smallest_time_seconds = min(smallest_time_seconds, time_seconds)
@@ -665,7 +678,7 @@ def Rule1_add_time_delta(csv_file_path):
         height_loss_difference_ft = height_loss_rank2_ft - height_loss_rank1_ft
 
         # Step 3: Convert climb rate from kts to ft for summary[0]
-        climb_rate_fps = float(summary[0]['Rule2_avg_climb_rate_kts']) * 1.68781  
+        climb_rate_fps = float(summary[i]['Rule2_avg_climb_rate_kts']) * 1.68781  
 
         # Step 4: Calculate rank1 climb rate / difference
         if climb_rate_fps != 0 and height_loss_difference_ft != 0:
@@ -696,14 +709,32 @@ def Rule1_add_time_delta(csv_file_path):
         composite_time_diff_s = time_behind_rank1_from_gs_s + ld_time_diff_s
         print('time_behind_rank1_from_gs_s',time_behind_rank1_from_gs_s)
         print('ld_time_diff_s',ld_time_diff_s)
+        print('composite_time_diff_s',composite_time_diff_s)
         composite_time_diff_s_values.append(int(composite_time_diff_s))
 
-        # Calculate composite_time_diff_mmss and append to the list
+        # Check if the time difference is negative
+        is_negative = composite_time_diff_s < 0
+
+        # Convert the time difference into a positive value
+        composite_time_diff_s = abs(composite_time_diff_s)
+
         hours = composite_time_diff_s // 3600
         minutes = (composite_time_diff_s) // 60
         seconds = composite_time_diff_s % 60
+
+        # Format the time difference as a string
         composite_time_diff_mmss = "{:02}:{:02}".format(int(minutes), int(seconds))
+
+        # If the original time difference was negative, add a negative sign to the output string
+        if is_negative:
+            composite_time_diff_mmss = "-" + composite_time_diff_mmss
+
+        print('composite_time_diff_mmss', composite_time_diff_mmss)    
+        
         composite_time_diff_mmss_values.append("'"+composite_time_diff_mmss)
+
+
+
 
     # Print the lists of time_behind values
     print("List of time_behind_rank1_from_gs_s values:", time_behind_gs_s_values)
