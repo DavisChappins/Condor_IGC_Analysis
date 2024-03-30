@@ -2,6 +2,7 @@
 from helperFile import *
 import csv
 import os
+from datetime import datetime
 
 
 
@@ -213,7 +214,7 @@ def add_igc_to_summary(file_name):
                    "Rule2_avg_climb_rate_kts", "Rule2_actual_MC_given_avg_ias_kts", "Num_useful_thermals", "Num_discarded_thermals_<75s_or_<500ft","Percent_discarded_thermals",
                    "Rule3_total_glide_distance_km", "Rule3_total_glide_more_percent",
                    "Rule4_avg_altitude_ft",
-                   "start_speed_gs_kts", "start_altitude_ft", 
+                   "start_speed_gs_kts", "start_altitude_ft", "start_time",
                    "finish_speed_gs_kts", "finish_altitude_ft", 
                    "task_speed_kmh", "task_distance_km","task_time_hmmss", "total_glide_time_mmss", "total_thermal_time_mmss"
                    ]
@@ -224,7 +225,7 @@ def add_igc_to_summary(file_name):
                    Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, useful_thermals, discarded_thermals, thermal_discard_percent,
                    Rule3_total_glide_distance_km, Rule3_total_glide_more_percent,
                    Rule4_avg_altitude_ft,
-                   start_speed_gs_kts, start_altitude_ft, 
+                   start_speed_gs_kts, start_altitude_ft, datetime.strftime(datetime.strptime(detected_start_time,'%H%M%S'),'%H:%M:%S'),
                    finish_speed_gs_kts, finish_altitude_ft,
                    task_speed_kmh, task_distance_km, task_time_hmmss, total_glide_time_mmss, total_thermal_time_mmss
                    ]
