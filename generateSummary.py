@@ -3,6 +3,7 @@ import glob
 from analyzeIGC import *
 from addTimeDeltas import *
 from helperFile import *
+from plotThermals import *
 
 '''
 
@@ -14,6 +15,12 @@ from helperFile import *
 
 AAT = 0 # set to 1 if AAT, set to 0 if racing task
 #To run an AAT analysis in Condor you must first add in condor.club results data using aatConvert.py
+
+tp_adjustment_km = -6
+# calculate turnpoint radius (if 360 circle) * num of TPs
+# example: triangle task with start line/finish line and 2 circular TPs of radius 3000m = 2*3km = -6km adjustment
+# (6 km less distance flown than to center of circle
+
 
 ##################    VARIABLES     ####################
 
@@ -60,7 +67,7 @@ detailed_summary_list.append(header_row)
 
 # Loop through each file and analyze it
 for igc_file in igc_files:
-    detailed_summary = add_igc_to_summary(igc_file)
+    detailed_summary = add_igc_to_summary(igc_file, tp_adjustment_km)
     print(f'Processed {igc_file}')
     if detailed_summary is not None:
         detailed_summary_list.append(detailed_summary)
@@ -99,5 +106,9 @@ Rule3_add_time_delta(file_path)
 
 #max_start_height_ft = detailed_summary[15]
 #mass_kg = 600 #18m is 600, 15m is 500, club is 250 
+
+# Generate thermal plot vs time
+print("Plotting thermals")
+plotThermalsInteractive()
 
 

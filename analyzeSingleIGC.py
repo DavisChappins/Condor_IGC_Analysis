@@ -225,4 +225,3 @@ if task_finish_status == 'Task Completed':
 else:
     print(pilot_id,' did not finish the task so this calculation will not run')
 
-

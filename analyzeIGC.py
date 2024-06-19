@@ -10,7 +10,7 @@ import os
 
 
 
-def add_igc_to_summary(file_name):
+def add_igc_to_summary(file_name, tp_adjustment_km):
     # Read the file and store each line as an element in a list
     with open(file_name, 'r') as file:
         igc_data = [line.strip() for line in file.readlines()]
@@ -147,6 +147,14 @@ def add_igc_to_summary(file_name):
 
 
         task_distance_km, task_distance_nmi = extract_task_distance(igc_data)
+        
+        #add in adjustments
+        tp_adjustment_mi = tp_adjustment_km * 0.539957
+        
+        task_distance_km = task_distance_km + tp_adjustment_km
+        task_distance_nmi = task_distance_nmi + tp_adjustment_mi
+    
+        
         #print(task_distance_nmi)
         #print('task_distance_km',task_distance_km)
         #print(thermal_data)
@@ -288,5 +296,4 @@ def add_igc_to_summary(file_name):
     return
         
     
-
 

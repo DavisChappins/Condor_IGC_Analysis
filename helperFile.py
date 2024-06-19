@@ -451,7 +451,7 @@ def label_thermal_series(flight_data, threshold=60, window_size=20):
     thermal_count = 1
 
     for i in range(len(flight_data)):
-        if flight_data[i][10] is not None and flight_data[i][10] > threshold:
+        if flight_data[i][10] not in (None, "") and flight_data[i][10] > threshold:
             # Check the condition for the record at index i + window_size
             if (
                 i + window_size < len(flight_data)
