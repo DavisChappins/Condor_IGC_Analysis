@@ -1,7 +1,7 @@
 # helperFile.py
 from math import radians, sin, cos, sqrt, atan2, degrees
 import math
-from collections import deque
+from collections import deque, Counter
 from datetime import datetime, timedelta
 import csv
 import pandas as pd
@@ -300,7 +300,8 @@ def find_and_set_task_start(flight_data, detected_start_time):
         if flight_data[i][1] == detected_start_time:
             flight_data[i][12] = 'TaskStart'
             break
-
+    print("Task Start at: ",detected_start_time)
+    
     return flight_data
 
 def calculate_task_finish(flight_data, igc_data):
@@ -351,7 +352,7 @@ def calculate_task_finish(flight_data, igc_data):
         if flight_data[i][1] == calculated_task_finish:
             flight_data[i][12] = 'TaskFinish'
             break
-
+    
     return flight_data
 
 
@@ -422,7 +423,7 @@ def trim_records_by_task(flight_data):
     # Trim records based on 'TaskStart' and 'TaskFinish'
     if task_start_index is not None and task_finish_index is not None:
         flight_data = flight_data[task_start_index: task_finish_index + 1]
-
+    
     return flight_data
 
 # helperFile.py
@@ -1389,19 +1390,39 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
 def get_pilot_cn_and_name(igc_data):
     pilot_name = None
     competition_id = None
+    fallback_filename = None
 
     for line in igc_data:
-        if 'HFPLTPILOT:' in line:
+
+        
+        if 'HFPLTPILOT:' in line or 'HFPLTPILOTINCHARGE:' in line:
             colon_index = line.index(':')
             pilot_name = line[colon_index + 1:].strip()
+            #print(f"Found pilot name: {pilot_name}")  # Debug print for pilot name
 
-        elif 'HFCIDCOMPETITIONID:' in line:
+        elif 'HFCIDCOMPETITIONID:' in line or 'HFGIDGLIDERID:' in line:
             colon_index = line.index(':')
             competition_id = line[colon_index + 1:].strip()
-    
-    result_str = competition_id+' - '+pilot_name
+            #print(f"Found competition ID: {competition_id}")  # Debug print for competition ID
 
+        elif 'KIGCFILENAME=' in line:
+            equal_index = line.index('=')
+            fallback_filename = line[equal_index + 1:].strip()
+            #print(f"Found fallback filename: {fallback_filename}")  # Debug print for fallback filename
+
+    # Check and print if fallback filename was found
+    if not fallback_filename:
+        print("Fallback filename not found or empty.")
+
+    # Construct the result string or use the fallback filename if pilot name or competition ID is missing
+    if competition_id and pilot_name:
+        result_str = f"{competition_id} - {pilot_name}"
+    else:
+        result_str = fallback_filename
+
+    print(f"Final result: {result_str}")  # Debug print for the final result
     return result_str
+
 
 def find_task_speed(igc_data):
     
@@ -1468,6 +1489,67 @@ def count_valid_rows(glide_info):
         if key != 'Overall' and value['total_distance_km'] > 2:
             count += 1
     return count
+
+
+def calculate_groundspeed_frequency(glide_data):
+    """
+    Extracts groundspeed data from glide_data, converts it from m/s to knots, 
+    rounds each value to the nearest whole number, discards invalid values above 160 knots,
+    calculates frequency, and returns an array of frequency and groundspeed in knots.
+    
+    :param glide_data: A dictionary containing glide data with groundspeed values.
+    :return: A list of tuples (frequency, groundspeed_kts).
+    """
+    groundspeeds_kts = []
+
+    print("Starting to process glide_data...")
+    
+    # Extract groundspeed values from glide_data and convert to knots
+    for key, records in glide_data.items():
+        #print(f"Processing key: {key}")
+        for index, record in enumerate(records):
+            try:
+                # Extract groundspeed value in m/s (index 8)
+                groundspeed_mps = record[8]
+                #print(f"Record {index}: Extracted groundspeed (m/s): {groundspeed_mps}")
+
+                # Convert groundspeed from m/s to knots (1 m/s = 1.94384 knots)
+                groundspeed_kts = groundspeed_mps * 1.94384
+                #print(f"Record {index}: Converted groundspeed to knots: {groundspeed_kts}")
+
+                # Round to the nearest whole number
+                #groundspeed_kts = round(groundspeed_kts)
+                groundspeed_kts = 5 * round(groundspeed_kts / 5)
+                #print(f"Record {index}: Rounded groundspeed (knots): {groundspeed_kts}")
+
+                # Discard groundspeed values above 250 knots
+                if groundspeed_kts > 250:
+                    print(f"Record {index}: Discarded invalid groundspeed above 160 kts: {groundspeed_kts}")
+                    continue
+
+                # Append to list
+                groundspeeds_kts.append(groundspeed_kts)
+            except (ValueError, TypeError) as e:
+                # Skip if groundspeed is invalid
+                print(f"Record {index}: Error processing groundspeed value - {e}")
+                continue
+
+    print(f"All extracted and converted groundspeeds (knots): {groundspeeds_kts}")
+
+    # Calculate the frequency of each rounded groundspeed value
+    frequency_counter = Counter(groundspeeds_kts)
+    print(f"Frequency counter: {frequency_counter}")
+
+    # Convert to a list of tuples (frequency, groundspeed_kts)
+    freq_gs_kts = [(freq, gs_kts) for gs_kts, freq in frequency_counter.items()]
+
+    # Sort by groundspeed for better readability
+    freq_gs_kts.sort(key=lambda x: x[1])
+    print(f"Final sorted list of (frequency, groundspeed_kts): {freq_gs_kts}")
+
+    return freq_gs_kts
+
+
 
 def delete_csv_files_with_prefix(prefix):
     # Create a pattern to match CSV files starting with the specified prefix

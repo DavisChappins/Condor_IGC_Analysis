@@ -47,11 +47,35 @@ def plotThermalsInteractive():
     # Initialize a list to store all the maximum data points
     max_data_points = []
 
+
+    # Print the entire ordered dataset to inspect any inconsistencies
+    print("Full ordered dataset names list:")
+    print(ordered_dataset_names)
+
+
     # Iterate through each dataset name in the ordered list
-    for dataset_name in ordered_dataset_names:
-        # Find the corresponding CSV file
-        csv_file = [file for file in csv_files if dataset_name in file][0]
+    for index, dataset_name in enumerate(ordered_dataset_names):
+        # Print the index and the dataset_name to help identify the problematic entry
+        print(f"Index: {index}, Type of dataset_name: {type(dataset_name)}, Value: {dataset_name}")
+
+        # Check if dataset_name is NaN or not a valid string
+        if pd.isna(dataset_name):
+            print(f"Skipping NaN dataset_name at index {index}. Full row: {ordered_dataset_names[index]}")
+            continue  # Skip this iteration if dataset_name is NaN
+
+        # Find the corresponding CSV file safely
+        matching_files = [file for file in csv_files if str(dataset_name) in file]
         
+        # Check if matching files were found before accessing
+        if not matching_files:
+            print(f"No matching file found for dataset_name '{dataset_name}' at index {index}")
+            continue
+        
+        csv_file = matching_files[0]  # Access the first matching file safely
+        
+        # Proceed with processing the found file
+        print(f"Processing file: {csv_file} for dataset_name: {dataset_name}")
+        # Add your code here to process csv_file
         # Read CSV file into pandas DataFrame
         df = pd.read_csv(csv_file)
         
@@ -155,4 +179,4 @@ def plotThermalsInteractive():
     
     print("Thermals plotted successfully")
 
-plotThermalsInteractive()
+#plotThermalsInteractive()

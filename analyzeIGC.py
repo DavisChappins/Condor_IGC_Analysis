@@ -2,7 +2,7 @@
 from helperFile import *
 import csv
 import os
-
+import re
 
 
 #do not run this file, run generateSummary.py
@@ -12,6 +12,7 @@ import os
 
 def add_igc_to_summary(file_name, tp_adjustment_km):
     # Read the file and store each line as an element in a list
+    print("Opening ",file_name)
     with open(file_name, 'r') as file:
         igc_data = [line.strip() for line in file.readlines()]
 
@@ -19,6 +20,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km):
     flight_data = process_igc_data(igc_data)
 
     pilot_id = get_pilot_cn_and_name(igc_data)
+    print("pilot_id",pilot_id)
 
     task_finish_status = determine_if_task_completed(igc_data)
 
@@ -91,6 +93,17 @@ def add_igc_to_summary(file_name, tp_adjustment_km):
         number_of_glides = len(glide_data)
 
 
+        #print('glide_data',glide_data)
+        
+        #new function to calculate (frequency, gs_kts)
+        freq_gs_kts = calculate_groundspeed_frequency(glide_data)
+        print(freq_gs_kts)
+        
+        
+
+
+
+        
         
         #average_rate_of_climb = calculate_average_rate_of_climb(thermal_data['Thermal1'])
         average_rate_of_climb = calculate_average_rate_of_climb_for_all(thermal_data)
@@ -257,7 +270,29 @@ def add_igc_to_summary(file_name, tp_adjustment_km):
             
 
         # WRITE COMBINED INFO
-        csv_file_name = 'sequenceData_'+pilot_id+'.csv'
+        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', pilot_id).strip() + '.csv'
+        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id or 'unknown')).strip() + '.csv'
+        base_name = os.path.splitext(os.path.basename(file_name))[0]
+        csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
+
+
+        # new section after freq_gs_kts calculation
+        freq_gs_kts_csv_file = 'freq_gs_kts_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
+
+        # Write freq_gs_kts to the new CSV file
+        with open(freq_gs_kts_csv_file, 'w', newline='') as csv_file:
+            csv_writer = csv.writer(csv_file)
+            # Write the header
+            csv_writer.writerow(['Frequency', 'Groundspeed_kts'])
+            # Write the data rows
+            for frequency, groundspeed_kts in freq_gs_kts:
+                csv_writer.writerow([frequency, groundspeed_kts])
+
+        print(f'freq_gs_kts has been written to {freq_gs_kts_csv_file}.')
+        
+
+
+
 
         # Open the CSV file in write mode
         with open(csv_file_name, 'w', newline='') as csv_file:

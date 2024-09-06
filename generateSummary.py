@@ -4,6 +4,7 @@ from analyzeIGC import *
 from addTimeDeltas import *
 from helperFile import *
 from plotThermals import *
+from plotGlideSpeeds import *
 
 '''
 
@@ -16,7 +17,7 @@ from plotThermals import *
 AAT = 0 # set to 1 if AAT, set to 0 if racing task
 #To run an AAT analysis in Condor you must first add in condor.club results data using aatConvert.py
 
-tp_adjustment_km = -6
+tp_adjustment_km = 1
 # calculate turnpoint radius (if 360 circle) * num of TPs
 # example: triangle task with start line/finish line and 2 circular TPs of radius 3000m = 2*3km = -6km adjustment
 # (6 km less distance flown than to center of circle
@@ -41,6 +42,11 @@ else:
 
 delete_csv_files_with_prefix('sequenceData')
 print('sequence files deleted')
+
+
+delete_csv_files_with_prefix('freq_gs_kts_')
+print('sequence files deleted')
+
 
 # Get the directory of the script
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -111,4 +117,5 @@ Rule3_add_time_delta(file_path)
 print("Plotting thermals")
 plotThermalsInteractive()
 
-
+print("Plotting glide speeds")
+plot_freq_vs_groundspeed()
