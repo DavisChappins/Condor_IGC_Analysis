@@ -3,6 +3,15 @@
 Run generateSummary.py to generate summary.csv for all .igc files inside the folder /igcFiles  
 All of the data is from task start to task finish
 
+
+  The 4 rules are:  
+  1) Glide better
+  2) Climb better
+  3) Fly a shorter distance
+  4) Don't do anything where you have to give up rules 1 2 or 3 to survive (dont put yourself in jail)
+
+These are the only ways to fly faster than another glider. The columns analyze these rules to see where you have gained or lost vs others.
+
 # Summary columns
 
 **Rule1_glide_avg_gs_kts** groundspeed during glide segments, average  
