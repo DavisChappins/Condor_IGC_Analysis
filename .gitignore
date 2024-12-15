@@ -1,0 +1,10 @@
+# Ignore CSV files
+*.csv
+
+# Ignore IGC files
+*.igc
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
