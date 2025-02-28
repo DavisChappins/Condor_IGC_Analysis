@@ -3,12 +3,33 @@ import plotly.graph_objs as go
 import plotly.offline as pyo
 import pandas as pd
 import glob
-import random
 
 def convert_duration_to_seconds(duration):
     """Convert duration from mm:ss format to total seconds."""
-    minutes, seconds = map(int, duration.split(':'))
-    return minutes * 60 + seconds
+    try:
+        minutes, seconds = map(int, duration.split(':'))
+        return minutes * 60 + seconds
+    except ValueError:
+        print(f"Error converting duration '{duration}' to seconds.")
+        return None
+
+def interleave_list(lst):
+    """
+    Return a new list that interleaves items from the start and end of the input list.
+    E.g. [A, B, C, D, E] -> [A, E, B, D, C]
+    """
+    result = []
+    left = 0
+    right = len(lst) - 1
+    while left <= right:
+        if left == right:
+            result.append(lst[left])
+        else:
+            result.append(lst[left])
+            result.append(lst[right])
+        left += 1
+        right -= 1
+    return result
 
 def plotThermalsInteractive():
     # Suppress warnings
@@ -26,18 +47,25 @@ def plotThermalsInteractive():
     # Sort dataset names based on their order in Column A of 'summary.csv'
     ordered_dataset_names = summary_df['Name'].tolist()
 
-    # Predefined list of colors and shapes
-    colors = [
+    # Print the entire ordered dataset to inspect any inconsistencies
+    print("Full ordered dataset names list:")
+    print(ordered_dataset_names)
+
+    # Pre-defined list of colors
+    base_colors = [
         'black', 'blue', 'brown', 'crimson', 'darkblue', 'darkcyan', 'darkgoldenrod', 'darkgray', 
         'darkgreen', 'darkkhaki', 'darkmagenta', 'darkolivegreen', 'darkorange', 'darkred', 'darksalmon', 
         'darkseagreen', 'darkslateblue', 'darkslategray', 'darkturquoise', 'darkviolet', 'firebrick', 'gray', 
         'green', 'indigo', 'maroon', 'midnightblue', 'navy', 'olive', 'orangered', 'purple', 'rebeccapurple', 
         'rosybrown', 'saddlebrown', 'slategray', 'slategrey', 'teal'
     ]
-
+    # Interleave the colors to mix them up
+    colors = interleave_list(base_colors)
+    
+    # Predefined list of shapes (will cycle if pilots > len(shapes))
     shapes = ['circle', 'square', 'diamond', 'cross', 'triangle-up', 'hexagon', 'star', 'hexagram']
 
-    # Create empty dictionaries to track color and shape usage
+    # Create empty dictionaries to track color and shape usage (optional)
     color_dict = {}
     shape_dict = {}
 
@@ -47,94 +75,114 @@ def plotThermalsInteractive():
     # Initialize a list to store all the maximum data points
     max_data_points = []
 
-
-    # Print the entire ordered dataset to inspect any inconsistencies
-    print("Full ordered dataset names list:")
-    print(ordered_dataset_names)
-
-
     # Iterate through each dataset name in the ordered list
     for index, dataset_name in enumerate(ordered_dataset_names):
-        # Print the index and the dataset_name to help identify the problematic entry
         print(f"Index: {index}, Type of dataset_name: {type(dataset_name)}, Value: {dataset_name}")
 
-        # Check if dataset_name is NaN or not a valid string
         if pd.isna(dataset_name):
             print(f"Skipping NaN dataset_name at index {index}. Full row: {ordered_dataset_names[index]}")
-            continue  # Skip this iteration if dataset_name is NaN
+            continue
 
-        # Find the corresponding CSV file safely
         matching_files = [file for file in csv_files if str(dataset_name) in file]
-        
-        # Check if matching files were found before accessing
+
         if not matching_files:
             print(f"No matching file found for dataset_name '{dataset_name}' at index {index}")
             continue
-        
-        csv_file = matching_files[0]  # Access the first matching file safely
-        
-        # Proceed with processing the found file
+
+        csv_file = matching_files[0]
         print(f"Processing file: {csv_file} for dataset_name: {dataset_name}")
-        # Add your code here to process csv_file
-        # Read CSV file into pandas DataFrame
+
         df = pd.read_csv(csv_file)
-        
+
+        # Clean and validate the 'starting_utc' column before conversion
+        df['starting_utc'] = df['starting_utc'].apply(lambda x: x if pd.to_datetime(x, errors='coerce') is not pd.NaT else None)
+
+        # Remove or correct problematic entries in 'starting_utc'
+        if df['starting_utc'].isnull().any():
+            invalid_entries = df[df['starting_utc'].isnull()]
+            print(f"Found invalid 'starting_utc' entries in {csv_file}:")
+            print(invalid_entries[['Sequence', 'starting_utc']])
+            # Optionally, drop rows with invalid 'starting_utc'
+            df = df.dropna(subset=['starting_utc'])
+
         # Convert 'starting_utc' column to datetime objects
-        df['starting_utc'] = pd.to_datetime(df['starting_utc'])
-        
+        df['starting_utc'] = pd.to_datetime(df['starting_utc'], errors='coerce')
+
         # Convert 'duration_mmss' to seconds
         df['duration_s'] = df['duration_mmss'].apply(convert_duration_to_seconds)
-        
+
         # Filter rows with data in necessary columns and filter for Thermal sequences
         thermals_df = df[df['Sequence'].str.contains('Thermal')].dropna(subset=['average_rate_of_climb_kts', 'starting_utc', 'duration_s'])
-        
+
         # Calculate total thermal duration
         total_duration = thermals_df['duration_s'].sum()
-        
+
         # Sort by thermal strength
         thermals_df = thermals_df.sort_values(by='average_rate_of_climb_kts', ascending=False)
-        
+
         # Calculate cumulative percentage time for x-axis
         thermals_df['cumulative_duration_s'] = thermals_df['duration_s'].cumsum()
         thermals_df['percentage_time'] = thermals_df['cumulative_duration_s'] / total_duration * 100
-        
-        # Choose a unique random color and shape
-        while True:
-            color = random.choice(colors)
-            shape = random.choice(shapes)
-            if (color, shape) not in color_dict.values():
-                break
-        
-        # Store color and shape for dataset
+
+        # Deterministically assign a color and shape based on the index
+        color = colors[index % len(colors)]
+        shape = shapes[index % len(shapes)]
         color_dict[dataset_name] = (color, shape)
-        
+
         # Add a column with the original duration_mmss for tooltip display
         thermals_df['tooltip_info'] = thermals_df.apply(
             lambda row: f"Pilot: {dataset_name}<br>Strength: {row['average_rate_of_climb_kts']} kts<br>Duration: {row['duration_mmss']}",
             axis=1
         )
-        
-        # Create scatter trace for the dataset
+
+        # Create scatter trace for the dataset (points)
         trace = go.Scatter(
             x=thermals_df['percentage_time'],
             y=thermals_df['average_rate_of_climb_kts'],
             mode='markers',
             name=dataset_name,
             marker=dict(
-                size=20,  # Set the marker size
-                color=color,  # Set the marker color
-                symbol=shape  # Set the marker shape
+                size=15,
+                color=color,
+                symbol=shape
             ),
+            legendgroup=dataset_name,  # Group markers with this pilot
             hoverinfo='text',
-            text=thermals_df['tooltip_info']  # Display tooltip information on hover
+            text=thermals_df['tooltip_info']
         )
-        
-        # Append trace to the list of traces
         traces.append(trace)
+
+        # Create a line trace connecting the points for this pilot
+        line_trace = go.Scatter(
+            x=thermals_df['percentage_time'],
+            y=thermals_df['average_rate_of_climb_kts'],
+            mode='lines',
+            name=f"{dataset_name} segments",
+            legendgroup=dataset_name,  # Group segments with the same pilot
+            line=dict(color=color, width=2),
+            hoverinfo='skip',
+            showlegend=False
+        )
+        traces.append(line_trace)
+
+        # Add a horizontal line from the y-axis to the first point
+        first_x = thermals_df['percentage_time'].iloc[0]
+        first_y = thermals_df['average_rate_of_climb_kts'].iloc[0]
+        horizontal_trace = go.Scatter(
+            x=[0, first_x],
+            y=[first_y, first_y],
+            mode='lines',
+            name=f"{dataset_name} y-axis connector",
+            legendgroup=dataset_name,  # Ensures it toggles with the pilot
+            line=dict(color=color, width=2),
+            hoverinfo='skip',
+            showlegend=False
+        )
+        traces.append(horizontal_trace)
 
         # Find average climb rate for the dataset from summary data
         avg_climb_rate = summary_df.loc[summary_df['Name'] == dataset_name, 'Rule2_avg_climb_rate_kts'].values[0]
-        
+
         # Add average line trace for the dataset
         avg_line_trace = go.Scatter(
             x=[0, 100],
@@ -142,41 +190,32 @@ def plotThermalsInteractive():
             mode='lines',
             name='avg',
             line=dict(color=color, width=2, dash='dash'),
-            visible='legendonly'  # Hide the average line by default
+            visible='legendonly'
         )
-        
-        # Append average line trace to the list of traces
         traces.append(avg_line_trace)
-        
+
         # Append maximum data point to the list of maximum data points
         max_data_points.append(thermals_df['average_rate_of_climb_kts'].max())
 
-    # Calculate the maximum y-axis range
     max_y_range = max(max_data_points) + 0.5
 
-    # Create layout with fixed x-axis and y-axis range and ticks at every integer
     layout = go.Layout(
         title='Average Rate of Climb vs Percentage of Total Thermal Time',
-        xaxis=dict(title='Percentage of Total Thermal Time', range=[0, 100]),  # Fix x-axis range from 0 to 100
-        yaxis=dict(title='Average Rate of Climb (kts)', range=[0, max_y_range], dtick=1),  # Fix y-axis range and set tick interval to 1
+        xaxis=dict(title='Percentage of Total Thermal Time', range=[0, 100]),
+        yaxis=dict(title='Average Rate of Climb (kts)', range=[0, max_y_range], dtick=1),
         showlegend=True,
-        updatemenus=[
-            dict(
-                buttons=[dict(label='All',
-                               method='update',
-                               args=[{'visible': [True] * (len(traces) // 2)},  # Toggle visibility of all traces (excluding average lines)
-                                     {'xaxis': {'title': 'Percentage of Total Thermal Time', 'range': [0, 100]},  # Ensure x-axis is always from 0 to 100
-                                      'yaxis': {'title': 'Average Rate of Climb (kts)', 'range': [0, max_y_range], 'dtick': 1}}])]
-            )
-        ]
+        updatemenus=[{
+            'buttons': [{
+                'label': 'All',
+                'method': 'update',
+                'args': [{'visible': [True] * len(traces)},
+                         {'xaxis': {'title': 'Percentage of Total Thermal Time', 'range': [0, 100]},
+                          'yaxis': {'title': 'Average Rate of Climb (kts)', 'range': [0, max_y_range], 'dtick': 1}}]
+            }]
+        }]
     )
 
-    # Create figure
     fig = go.Figure(data=traces, layout=layout)
-
-    # Plot
     pyo.plot(fig, filename='summaryClimb_interactive.html')
     
     print("Thermals plotted successfully")
-
-#plotThermalsInteractive()

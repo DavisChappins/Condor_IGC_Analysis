@@ -5,6 +5,7 @@ from addTimeDeltas import *
 from helperFile import *
 from plotThermals import *
 from plotGlideSpeeds import *
+from generateAdditionalSummary import *
 
 '''
 
@@ -17,7 +18,7 @@ from plotGlideSpeeds import *
 AAT = 0 # set to 1 if AAT, set to 0 if racing task
 #To run an AAT analysis in Condor you must first add in condor.club results data using aatConvert.py
 
-tp_adjustment_km = 1
+tp_adjustment_km = -11
 # calculate turnpoint radius (if 360 circle) * num of TPs
 # example: triangle task with start line/finish line and 2 circular TPs of radius 3000m = 2*3km = -6km adjustment
 # (6 km less distance flown than to center of circle
@@ -119,3 +120,14 @@ plotThermalsInteractive()
 
 print("Plotting glide speeds")
 plot_freq_vs_groundspeed()
+
+
+
+
+
+
+#must have generateAdditionalSummary.py
+generate_slim_summary()
+generate_slim_rules_summary()
+generate_slim_timing_summary()
+generate_slim_gap_analysis_summary()
