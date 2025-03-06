@@ -6,6 +6,7 @@ from helperFile import *
 from plotThermals import *
 from plotGlideSpeeds import *
 from generateAdditionalSummary import *
+from formatExcel import *
 
 '''
 
@@ -131,3 +132,6 @@ generate_slim_summary()
 generate_slim_rules_summary()
 generate_slim_timing_summary()
 generate_slim_gap_analysis_summary()
+
+#format summary
+format_excel_from_csv("summary.csv","summary.xlsx")
