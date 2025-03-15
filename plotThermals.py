@@ -216,6 +216,6 @@ def plotThermalsInteractive():
     )
 
     fig = go.Figure(data=traces, layout=layout)
-    pyo.plot(fig, filename='summaryClimb_interactive.html')
+    pyo.plot(fig, filename='summaryClimb_interactive.html', auto_open=False)
     
     print("Thermals plotted successfully")

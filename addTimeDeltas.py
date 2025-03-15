@@ -153,6 +153,158 @@ def Rule2_add_time_delta(csv_file_path):
         
     print("Added [Rule2_time_behind_rank1, Rule2_time_behind_best_climb_mmss] to analysis")
 
+def Start_energy_add_time_delta(csv_file_path):
+    """
+    For each row, calculate the time (in seconds) it takes to climb the lost height 
+    due to start energy (using the value in 'height_loss_due_to_start_energy_ft') at the pilot's 
+    average climb rate ('Rule2_avg_climb_rate_kts', converted from kts to ft/s using 1.68781).
+    Then compute the delta compared to the first (rank1) entry as:
+         delta = current_entry_time - rank1_time
+    The result is formatted in "mm:ss" (with a leading single quote) and added to 
+    a new CSV column 'Start_energy_time_behind_rank1'.
+    
+    Parameters:
+        csv_file_path (str): Path to the CSV file to update.
+    """
+    summary = []
+    with open(csv_file_path, 'r') as csvfile:
+        csv_reader = csv.DictReader(csvfile)
+        header = csv_reader.fieldnames
+        for row in csv_reader:
+            summary.append(row)
+    
+    # Calculate the climb time (in seconds) for each row.
+    # Climb time = height_loss_due_to_start_energy_ft / (Rule2_avg_climb_rate_kts * 1.68781)
+    for row in summary:
+        try:
+            height_loss = float(row.get('height_loss_due_to_start_energy_ft', 0))
+        except ValueError:
+            height_loss = 0
+        try:
+            avg_climb_rate_kts = float(row.get('Rule2_avg_climb_rate_kts', 0))
+        except ValueError:
+            avg_climb_rate_kts = 0
+        
+        climb_rate_fps = avg_climb_rate_kts * 1.68781
+        if climb_rate_fps:
+            climb_time_seconds = height_loss / climb_rate_fps
+        else:
+            climb_time_seconds = 0
+        
+        # Store the computed time temporarily in the row
+        row['__start_energy_climb_time_s'] = climb_time_seconds
+
+    # Use the first row's climb time as the rank1 reference.
+    rank1_time = summary[0]['__start_energy_climb_time_s']
+    
+    # Calculate the delta for each row and format it as "mm:ss".
+    for row in summary:
+        delta = float(row['__start_energy_climb_time_s']) - rank1_time
+        # Round the delta to an integer number of seconds.
+        delta_sec = int(round(delta))
+        if delta_sec < 0:
+            mm = int(abs(delta_sec) // 60)
+            ss = int(abs(delta_sec) % 60)
+            formatted_delta = "'-" + '{:02}:{:02}'.format(mm, ss)
+        else:
+            mm = int(delta_sec // 60)
+            ss = int(delta_sec % 60)
+            formatted_delta = "'" + '{:02}:{:02}'.format(mm, ss)
+        row['Start_energy_time_behind_rank1'] = formatted_delta
+
+    # Remove the temporary column from header and rows.
+    if '__start_energy_climb_time_s' in header:
+        header.remove('__start_energy_climb_time_s')
+    for row in summary:
+        row.pop('__start_energy_climb_time_s', None)
+    
+    # Ensure the new column is in the header.
+    if 'Start_energy_time_behind_rank1' not in header:
+        header.append('Start_energy_time_behind_rank1')
+    
+    # Write the updated rows back to the CSV file.
+    with open(csv_file_path, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(summary)
+    
+    print("Added [Start_energy_time_behind_rank1] to analysis")
+
+
+def Finish_energy_add_time_delta(csv_file_path):
+    """
+    For each entry, calculate the climb time in seconds required to overcome the 
+    lost height due to finish energy (height_loss_due_to_finish_energy_ft) using the pilot's 
+    average climb rate (Rule2_avg_climb_rate_kts, converted from kts to ft/s using 1.68781).
+    Then, compute the time delta relative to the first (rank 1) entry as:
+         delta = current_entry_time - rank1_time
+    This delta is formatted as "mm:ss" (with a leading single quote) and will be negative
+    if the current entry's climb time is less than rank1's.
+    
+    Parameters:
+        csv_file_path (str): Path to the CSV file to update.
+    """
+    summary = []
+    with open(csv_file_path, 'r') as csvfile:
+        csv_reader = csv.reader(csvfile)
+        header = next(csv_reader, None)
+        if header:
+            for row in csv_reader:
+                row_dict = dict(zip(header, row))
+                summary.append(row_dict)
+    
+    # Calculate the climb time (in seconds) for each entry.
+    # Climb time = height_loss_due_to_finish_energy_ft / (Rule2_avg_climb_rate_kts * 1.68781)
+    finish_energy_time_seconds = []
+    for entry in summary:
+        try:
+            height_loss = float(entry.get('height_loss_due_to_finish_energy_ft', '0'))
+        except ValueError:
+            height_loss = 0.0
+        try:
+            avg_climb_rate = float(entry.get('Rule2_avg_climb_rate_kts', '0'))
+        except ValueError:
+            avg_climb_rate = 0.0
+        climb_rate_fps = avg_climb_rate * 1.68781
+        if climb_rate_fps != 0:
+            climb_time = height_loss / climb_rate_fps
+        else:
+            climb_time = 0
+        finish_energy_time_seconds.append(climb_time)
+    
+    # Use the first entry's climb time as the rank1 reference.
+    rank1_time = finish_energy_time_seconds[0]
+    
+    # Compute delta (in seconds) relative to rank1: delta = current_time - rank1_time.
+    finish_energy_time_behind_rank1_list = []
+    for t in finish_energy_time_seconds:
+        delta = t - rank1_time
+        # To handle negative values properly, compute the absolute value and then prefix with '-' if needed.
+        delta_sec = int(round(delta))
+        if delta_sec < 0:
+            mm = int(abs(delta_sec) // 60)
+            ss = int(abs(delta_sec) % 60)
+            formatted_delta = "'-" + '{:02}:{:02}'.format(mm, ss)
+        else:
+            mm = int(delta_sec // 60)
+            ss = int(delta_sec % 60)
+            formatted_delta = "'" + '{:02}:{:02}'.format(mm, ss)
+        finish_energy_time_behind_rank1_list.append(formatted_delta)
+    
+    # Add the new column to the header (if not already present) and update each entry.
+    new_col = 'Finish_energy_time_behind_rank1'
+    if new_col not in header:
+        header.append(new_col)
+    for i, entry in enumerate(summary):
+        entry[new_col] = finish_energy_time_behind_rank1_list[i]
+    
+    # Write the updated rows back to the CSV file.
+    with open(csv_file_path, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(summary)
+        
+    print("Added [Finish_energy_time_behind_rank1] to analysis")
 def Task_time_behind_rank1(csv_file_path):
     summary = []
     with open(csv_file_path, 'r') as csvfile:

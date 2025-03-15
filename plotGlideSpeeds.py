@@ -155,7 +155,7 @@ def plot_freq_vs_groundspeed():
     fig = go.Figure(data=traces, layout=layout)
 
     # Generate the interactive HTML plot
-    pyo.plot(fig, filename='groundspeed_vs_percent_time_spent.html')
+    pyo.plot(fig, filename='groundspeed_vs_percent_time_spent.html', auto_open=False)
 
     print("Plot generated successfully: groundspeed_vs_percent_time_spent.html")
 

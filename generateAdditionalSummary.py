@@ -1,8 +1,9 @@
 import csv
 
-def generate_slim_summary():
-    # Dictionary mapping "old_name" -> "new_name"
-    columns_map = {
+def generate_slim_summary(AAT):
+    # Define the base mapping without the Gap column.
+    # Define the first part of the dictionary up to "Task Time"
+    pre_gap = {
         "rank": "Rank",
         "Name": "Name",
         "Rule1_glide_avg_ias_kts": "Ave Glide IAS (kts)",
@@ -14,13 +15,26 @@ def generate_slim_summary():
         "Rule4_avg_altitude_ft": "Avg Alt (ft)",
         "task_speed_kmh": "Task Speed (km/h)",
         "task_time_hmmss": "Task Time",
-        "task_time_behind_rank1_mmss": "Gap",
+    }
+
+    # Determine which key to use for "Gap"
+    if AAT == 1:
+        gap_key = "AAT_time_behind_mmss"
+    else:
+        gap_key = "task_time_behind_rank1_mmss"
+    gap_entry = {gap_key: "Gap"}
+
+    # Define the remaining part of the dictionary
+    post_gap = {
         "Rule1_time_behind_rank1_mmss": "Glide Gap",
         "Rule1_time_behind_rank1_from_gs_mmss": "'-- from Glide Speed",
         "Rule1_time_behind_rank1_from_ld_mmss": "'-- from Glide L/D",
         "Rule2_time_behind_rank1": "Climb Gap",
         "Rule3_time_behind_rank1": "Deviation Gap"
     }
+
+    # Combine the parts in order
+    columns_map = {**pre_gap, **gap_entry, **post_gap}
     
     original_csv = "summary.csv"
     slim_csv = "slim_summary.csv"
@@ -30,17 +44,15 @@ def generate_slim_summary():
         reader = csv.DictReader(infile)
         rows = list(reader)
 
-    # Build a new list of rows containing only the columns in columns_map
+    # Build a new list of rows containing only the desired columns.
     slim_rows = []
     for row in rows:
         new_row = {}
-        # For each original->new name mapping:
         for old_col, new_col in columns_map.items():
-            # If old_col doesn't exist in row, default to empty string
             new_row[new_col] = row.get(old_col, "")
         slim_rows.append(new_row)
 
-    # The new CSV's header is the *values* of columns_map (the "new" names)
+    # The header for the new CSV is the values of columns_map.
     new_header = list(columns_map.values())
 
     # Write the slim rows to slim_summary.csv
@@ -50,7 +62,6 @@ def generate_slim_summary():
         writer.writerows(slim_rows)
 
     print(f"Created '{slim_csv}' with only the requested columns.")
-    
     
 
 def generate_slim_rules_summary():

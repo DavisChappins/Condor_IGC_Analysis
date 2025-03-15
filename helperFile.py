@@ -9,6 +9,9 @@ import os
 import glob
 
 
+
+
+
 def convert_seconds_to_mmss(overall_time_s):
     minutes = overall_time_s // 60
     seconds = overall_time_s % 60
@@ -305,27 +308,59 @@ def find_and_set_task_start(flight_data, detected_start_time):
     return flight_data
 
 def calculate_task_finish(flight_data, igc_data):
+    """
+    Calculates the task finish time based on task duration and start time extracted from IGC data,
+    then updates the flight data to mark the finish time.
+
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
+    - igc_data (list): A list of strings representing lines from an IGC file.
+
+    Returns:
+    - list: Updated flight data with 'TaskFinish' marked.
+    """
     # Extract the task time from igc_data
     detected_task_duration = None
+    print("Extracting task duration from IGC data...")
     for line in igc_data:
+        #print(f"Checking line: {line.strip()}")
         if line.startswith("LCONFlightInfoTaskTime="):
             detected_task_duration = line.split("=")[1].replace(":", "")
+            print(f"Detected task duration: {detected_task_duration}")
             break
+    if not detected_task_duration:
+        print("Error: Task duration not found in IGC data.")
+        return flight_data
 
     # Extract the start time from igc_data
     detected_start_time = None
+    print("Extracting start time from IGC data...")
     for line in igc_data:
+        #print(f"Checking line: {line.strip()}")
         if line.startswith("LCONFlightInfoTaskStart="):
             detected_start_time = line.split("=")[1].replace(":", "")
+            print(f"Detected start time: {detected_start_time}")
             break
+    if not detected_start_time:
+        print("Error: Start time not found in IGC data.")
+        return flight_data
 
     # Convert task duration and start time to HHMMSS
     task_duration_hhmmss = detected_task_duration[:6]
     start_time_hhmmss = detected_start_time[:6]
+    print(f"Task duration in HHMMSS: {task_duration_hhmmss}")
+    print(f"Start time in HHMMSS: {start_time_hhmmss}")
 
     # Convert string times to datetime objects
-    task_duration_time = datetime.strptime(task_duration_hhmmss, "%H%M%S")
-    start_time = datetime.strptime(start_time_hhmmss, "%H%M%S")
+    try:
+        task_duration_time = datetime.strptime(task_duration_hhmmss, "%H%M%S")
+        start_time = datetime.strptime(start_time_hhmmss, "%H%M%S")
+    except ValueError as e:
+        print(f"Error parsing times: {e}")
+        return flight_data
+
+    print(f"Parsed task duration time: {task_duration_time}")
+    print(f"Parsed start time: {start_time}")
 
     # Calculate the task finish time (timedelta)
     calculated_task_finish_timedelta = timedelta(
@@ -333,26 +368,30 @@ def calculate_task_finish(flight_data, igc_data):
         minutes=task_duration_time.minute,
         seconds=task_duration_time.second
     )
+    print(f"Calculated task finish timedelta: {calculated_task_finish_timedelta}")
 
     # Add timedelta to start_time to get finish time (datetime)
     calculated_task_finish_datetime = start_time + calculated_task_finish_timedelta
+    print(f"Calculated task finish datetime: {calculated_task_finish_datetime}")
 
     # Convert the result back to string in HHMMSS format
     calculated_task_finish = calculated_task_finish_datetime.strftime("%H%M%S")
-    
-    
-    # Calculate the task finish time and convert it to HHMMSS
-    #calculated_task_finish = str(int(task_duration_hhmmss) + int(start_time_hhmmss))
-    
-    
-    
-    
+    print(f"Calculated task finish time (HHMMSS): {calculated_task_finish}")
+
     # Look for a match in flight_data[i][1] for calculated_task_finish
+    print("Searching for the calculated task finish time in flight data...")
+    found_task_finish = False
     for i in range(1, len(flight_data)):
+        #print(f"Checking flight data row {i}: {flight_data[i]}")
         if flight_data[i][1] == calculated_task_finish:
             flight_data[i][12] = 'TaskFinish'
+            print(f"Task finish time matched at row {i}, marking as 'TaskFinish'.")
+            found_task_finish = True
             break
-    
+
+    if not found_task_finish:
+        print("No match found for calculated task finish time in flight data.")
+
     return flight_data
 
 
@@ -410,20 +449,49 @@ def analyze_heading_changes_old(flight_data):
 
 
 def trim_records_by_task(flight_data):
+    """
+    Trims the flight data records between 'TaskStart' and 'TaskFinish' markers.
+
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
+
+    Returns:
+    - list: Trimmed flight data including only records between 'TaskStart' and 'TaskFinish'.
+    """
     task_start_index = None
     task_finish_index = None
 
     # Find indices for 'TaskStart' and 'TaskFinish'
+    print("Searching for 'TaskStart' and 'TaskFinish' in the flight data...")
+
     for i, row in enumerate(flight_data):
+        # Debug: Show current row being checked
+        #print(f"Checking row {i}: {row}")
+
         if row[12] == 'TaskStart':
             task_start_index = i
+            print(f"'TaskStart' found at index {task_start_index}")
+
         elif row[12] == 'TaskFinish':
             task_finish_index = i
+            print(f"'TaskFinish' found at index {task_finish_index}")
 
-    # Trim records based on 'TaskStart' and 'TaskFinish'
+    # Check if both indices were found and trim records based on them
     if task_start_index is not None and task_finish_index is not None:
+        print(f"Trimming data from index {task_start_index} to {task_finish_index}")
         flight_data = flight_data[task_start_index: task_finish_index + 1]
-    
+    else:
+        if task_start_index is None:
+            print("Warning: 'TaskStart' not found in the flight data.")
+        if task_finish_index is None:
+            print("Warning: 'TaskFinish' not found in the flight data.")
+        print("No trimming performed due to missing markers.")
+
+    # Debug: Show the trimmed data
+    print("Trimmed flight data:")
+    for i, row in enumerate(flight_data):
+        #print(f"Row {i}: {row}")
+        break
     return flight_data
 
 # helperFile.py
@@ -537,6 +605,217 @@ def label_glide_series(flight_data):
             glide_flag = False
 
     return flight_data
+
+def calculate_perfect_start_J(task_start_height_ft: float) -> float:
+    """
+    Calculate the total energy of a perfect race start.
+    
+    Parameters:
+        task_start_height_ft (float): The start height in feet.
+    
+    Returns:
+        float: The total energy in joules.
+    """
+    mass = 600  # in kilograms
+    speed_knots = 91.7927  # speed in knots
+    # Convert speed from knots to m/s (1 knot = 0.514444 m/s)
+    speed_m_s = speed_knots * 0.514444
+    
+    # Calculate kinetic energy: KE = 0.5 * mass * v^2
+    kinetic_energy = 0.5 * mass * speed_m_s**2
+    
+    # Convert height from feet to meters (1 foot = 0.3048 m)
+    height_m = task_start_height_ft * 0.3048
+    
+    # Calculate potential energy: PE = mass * g * height, with g = 9.81 m/s^2
+    gravitational_acceleration = 9.81
+    potential_energy = mass * gravitational_acceleration * height_m
+    
+    # Total energy is the sum of kinetic and potential energy
+    total_energy = kinetic_energy + potential_energy
+    return total_energy
+
+
+def calculate_actual_energy(start_altitude_ft: float, start_speed_gs_kts: float) -> float:
+    """
+    Calculate the actual energy of the glider based on its start altitude and start speed.
+    
+    Parameters:
+        start_altitude_ft (float): The glider's starting altitude in feet.
+        start_speed_gs_kts (float): The glider's starting speed in knots.
+    
+    Returns:
+        float: The glider's actual total energy in joules.
+    """
+    mass = 600  # in kilograms
+    
+    # Convert speed from knots to m/s (1 knot = 0.514444 m/s)
+    speed_m_s = start_speed_gs_kts * 0.514444
+    kinetic_energy = 0.5 * mass * speed_m_s ** 2
+    
+    # Convert altitude from feet to meters (1 foot = 0.3048 m)
+    height_m = start_altitude_ft * 0.3048
+    gravitational_acceleration = 9.81  # m/s^2
+    potential_energy = mass * gravitational_acceleration * height_m
+    
+    total_energy = kinetic_energy + potential_energy
+    return total_energy
+
+def calculate_start_efficiency_score(start_altitude_ft: float, start_speed_gs_kts: float, task_start_height_ft: float) -> float:
+    """
+    Calculate the start efficiency score for the glider's start.
+    
+    The score is based on:
+      1. Calculating the efficiency percentage as:
+             (actual_start_energy_J / task_perfect_start_J) * 100
+      2. If this efficiency percentage is greater than 100, the excess is multiplied by 3
+         and subtracted from 100.
+      3. Finally, subtract 90 from the adjusted efficiency percentage and round to 2 decimals.
+    
+    Parameters:
+        start_altitude_ft (float): The glider's starting altitude in feet.
+        start_speed_gs_kts (float): The glider's starting speed in knots.
+    
+    Returns:
+        float: The start efficiency score.
+    """
+    actual_energy = calculate_actual_energy(start_altitude_ft, start_speed_gs_kts)
+    perfect_energy = calculate_perfect_start_J(task_start_height_ft)
+    efficiency_percentage = (actual_energy / perfect_energy) * 100
+    print("actual_energy",actual_energy,"perfect_energy",perfect_energy)
+    
+    if efficiency_percentage > 100:
+        excess = efficiency_percentage - 100
+        efficiency_percentage = 100 - (excess * 3)
+    
+    # Apply the final adjustment of subtracting 90
+    start_efficiency_score = round(efficiency_percentage - 90, 2)
+    #start_efficiency_score = efficiency_percentage
+    return start_efficiency_score
+
+def calculate_total_effective_height_loss(altitude_deficit_ft: float, speed_deficit_kts: float,
+                                            mass: float = 600, perfect_speed_kts: float = 91.7927,
+                                            g: float = 9.81) -> float:
+    """
+    Convert a speed deficit (in knots) into an equivalent height loss (in feet) using the kinetic energy difference,
+    then add the measured altitude deficit.
+
+    Parameters:
+        altitude_deficit_ft (float): The measured altitude deficit in feet.
+        speed_deficit_kts (float): The speed deficit in knots.
+        mass (float): Mass in kg (default is 600 kg).
+        perfect_speed_kts (float): The perfect start speed in knots (default is 91.7927 kts).
+        g (float): Acceleration due to gravity (default 9.81 m/s^2).
+
+    Returns:
+        float: The total effective height loss in feet.
+    """
+    # Convert speeds from knots to m/s (1 knot = 0.514444 m/s)
+    perfect_speed_mps = perfect_speed_kts * 0.514444
+    actual_speed_mps = (perfect_speed_kts - speed_deficit_kts) * 0.514444
+
+    # Calculate the kinetic energy difference (in joules)
+    ke_diff = 0.5 * mass * (perfect_speed_mps**2 - actual_speed_mps**2)
+
+    # Convert the kinetic energy difference to an equivalent height loss (in meters)
+    height_loss_m = ke_diff / (mass * g)
+
+    # Convert the height loss from meters to feet (1 m = 3.28084 ft)
+    height_loss_ft = height_loss_m * 3.28084
+
+    # Total effective height loss is the measured altitude deficit plus the equivalent loss from speed deficit
+    return altitude_deficit_ft + height_loss_ft
+
+
+def calculate_perfect_finish_J(task_finish_height_ft: float) -> float:
+    """
+    Calculate the total energy of a perfect race finish.
+    
+    This function uses a perfect finish speed of 70 knots and the given finish altitude.
+    
+    Parameters:
+        task_finish_height_ft (float): The finish altitude in feet.
+    
+    Returns:
+        float: The total energy in joules under perfect finish conditions.
+    """
+    mass = 600  # in kilograms
+    perfect_speed_knots = 70  # perfect finish speed in knots
+    # Convert speed from knots to m/s (1 knot = 0.514444 m/s)
+    speed_m_s = perfect_speed_knots * 0.514444
+    
+    # Calculate kinetic energy: KE = 0.5 * m * v^2
+    kinetic_energy = 0.5 * mass * speed_m_s**2
+    
+    # Convert finish height from feet to meters (1 ft = 0.3048 m)
+    height_m = task_finish_height_ft * 0.3048
+    
+    # Calculate potential energy: PE = m * g * h, with g = 9.81 m/s^2
+    gravitational_acceleration = 9.81
+    potential_energy = mass * gravitational_acceleration * height_m
+    
+    # Total energy is the sum of kinetic and potential energy
+    total_energy = kinetic_energy + potential_energy
+    return total_energy
+
+
+def calculate_actual_finish_energy_J(finish_altitude_ft: float, finish_speed_gs_kts: float) -> float:
+    """
+    Calculate the actual finish energy of the glider based on its finish altitude and finish speed.
+    
+    Parameters:
+        finish_altitude_ft (float): The glider's finish altitude in feet.
+        finish_speed_gs_kts (float): The glider's finish speed in knots.
+    
+    Returns:
+        float: The glider's actual finish energy in joules.
+    """
+    mass = 600  # in kilograms
+    
+    # Convert finish speed from knots to m/s (1 knot = 0.514444 m/s)
+    speed_m_s = finish_speed_gs_kts * 0.514444
+    kinetic_energy = 0.5 * mass * speed_m_s ** 2
+    
+    # Convert finish altitude from feet to meters (1 ft = 0.3048 m)
+    height_m = finish_altitude_ft * 0.3048
+    gravitational_acceleration = 9.81  # m/s^2
+    potential_energy = mass * gravitational_acceleration * height_m
+    
+    total_energy = kinetic_energy + potential_energy
+    return total_energy
+
+def calculate_finish_efficiency_score(finish_altitude_ft: float, finish_speed_gs_kts: float, task_finish_height_ft: float) -> float:
+    """
+    Calculate the finish efficiency score for the glider's finish.
+    
+    The score is based on:
+      1. Calculating the efficiency percentage as:
+             (actual_finish_energy_J / task_perfect_finish_J) * 100
+      2. If this efficiency percentage is greater than 100, the excess is multiplied by 3
+         and subtracted from 100.
+      3. Finally, subtract 90 from the adjusted efficiency percentage and round to 2 decimals.
+    
+    Parameters:
+        finish_altitude_ft (float): The glider's finish altitude in feet.
+        finish_speed_gs_kts (float): The glider's finish speed in knots.
+        task_finish_height_ft (float): The ideal finish altitude in feet to calculate the perfect finish energy.
+    
+    Returns:
+        float: The finish efficiency score.
+    """
+    actual_finish_energy = calculate_actual_finish_energy_J(finish_altitude_ft, finish_speed_gs_kts)
+    perfect_finish_energy = calculate_perfect_finish_J(task_finish_height_ft)
+    
+    efficiency_percentage = (perfect_finish_energy/actual_finish_energy) * 100
+    if efficiency_percentage > 100:
+        excess = efficiency_percentage - 100
+        efficiency_percentage = 100 - (excess * 4)
+    
+    #finish_efficiency_score = round(efficiency_percentage - 90, 2)
+    finish_efficiency_score = round(efficiency_percentage /10, 2)
+    #finish_efficiency_score = efficiency_percentage
+    return finish_efficiency_score
+
 
 def calculate_total_energy(flight_data):
     # Constants
@@ -666,7 +945,7 @@ def calculate_MC_equivalent(flight_data, igc_data):
         
             # Append '.csv' onto the end of the result
             glider_class += '.csv'
-            #print(glider_class)
+            print(glider_class)
             
             #return result
     #use glider_class in csv lookup
@@ -1519,7 +1798,8 @@ def calculate_groundspeed_frequency(glide_data):
 
                 # Round to the nearest whole number
                 #groundspeed_kts = round(groundspeed_kts)
-                groundspeed_kts = 5 * round(groundspeed_kts / 5)
+                #groundspeed_kts = 5 * round(groundspeed_kts / 5)
+                groundspeed_kts = 3 * round(groundspeed_kts / 3)
                 #print(f"Record {index}: Rounded groundspeed (knots): {groundspeed_kts}")
 
                 # Discard groundspeed values above 250 knots
