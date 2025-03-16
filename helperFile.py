@@ -7,6 +7,7 @@ import csv
 import pandas as pd
 import os
 import glob
+import numpy as np
 
 
 
@@ -949,7 +950,7 @@ def calculate_MC_equivalent(flight_data, igc_data):
             
             #return result
     #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
+    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
     MC_table = []
 
     with open(file_path, 'r') as file:
@@ -1200,10 +1201,11 @@ def thermal_sequence(thermal_data):
             print(f"No data for {key}.")
             thermal_info[key] = None
         else:
-            # Extract altitude, time, and speed data from thermal_data[key]
+            # Extract altitude, time, speed, and heading data from thermal_data[key]
             altitudes = [row[5] for row in data]
             times = list(range(len(data)))
             speeds_kmh = [row[9] for row in data]
+            headings_deg = [row[7] for row in data]
 
             # Calculate average rate of climb
             if times[-1] != 0:
@@ -1394,8 +1396,10 @@ def glide_sequence(glide_data):
 
     def convert_lat_lon_to_decimal(lat_str, lon_str):
         lat_dir, lon_dir = lat_str[-1], lon_str[-1]
-        lat_deg, lon_deg = float(lat_str[:2]), float(lon_str[:3])
-        lat_min, lon_min = float(lat_str[2:4] + '.' + lat_str[4:-1]), float(lon_str[3:5] + '.' + lon_str[5:-1])
+        lat_deg = float(lat_str[:2])
+        lon_deg = float(lon_str[:3])
+        lat_min = float(lat_str[2:4] + '.' + lat_str[4:7])
+        lon_min = float(lon_str[3:5] + '.' + lon_str[5:8])
         lat_decimal = lat_deg + lat_min / 60
         lon_decimal = lon_deg + lon_min / 60
         lat_decimal = lat_decimal if lat_dir.upper() == 'N' else -lat_decimal
@@ -1628,7 +1632,7 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
             
             #return result
     #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
+    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
     MC_table = []
 
     with open(file_path, 'r') as file:
@@ -1829,11 +1833,9 @@ def calculate_groundspeed_frequency(glide_data):
 
     return freq_gs_kts
 
-
-
 def delete_csv_files_with_prefix(prefix):
     # Create a pattern to match CSV files starting with the specified prefix
-    pattern = f'{prefix}*.csv'
+    pattern = os.path.join('temp', f'{prefix}*.csv')
 
     # Use glob to find all matching files
     files_to_delete = glob.glob(pattern)

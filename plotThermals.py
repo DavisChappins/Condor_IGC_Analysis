@@ -3,6 +3,7 @@ import plotly.graph_objs as go
 import plotly.offline as pyo
 import pandas as pd
 import glob
+import os
 
 def convert_duration_to_seconds(duration):
     """Convert duration from mm:ss format to total seconds."""
@@ -36,7 +37,7 @@ def plotThermalsInteractive():
     warnings.filterwarnings("ignore", message="Could not infer format, so each element will be parsed individually")
 
     # Find all CSV files starting with 'sequenceData_'
-    csv_files = glob.glob('sequenceData_*.csv')
+    csv_files = glob.glob(os.path.join('temp', 'sequenceData_*.csv'))
 
     # Read summary data
     summary_df = pd.read_csv('summary.csv')

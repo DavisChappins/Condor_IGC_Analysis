@@ -308,14 +308,11 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
             
 
         # WRITE COMBINED INFO
-        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', pilot_id).strip() + '.csv'
-        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id or 'unknown')).strip() + '.csv'
-        base_name = os.path.splitext(os.path.basename(file_name))[0]
-        csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
-
+        # Create the csv file name with the pilot_id or base_name
+        csv_file_name = os.path.join('temp', 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv')
 
         # new section after freq_gs_kts calculation
-        freq_gs_kts_csv_file = 'freq_gs_kts_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
+        freq_gs_kts_csv_file = os.path.join('temp', 'freq_gs_kts_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv')
 
         # Write freq_gs_kts to the new CSV file
         with open(freq_gs_kts_csv_file, 'w', newline='') as csv_file:
@@ -369,4 +366,3 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
     return
         
     
-

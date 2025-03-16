@@ -158,7 +158,7 @@ if task_finish_status == 'Task Completed':
     #glide information
     
     # Specify the CSV file name
-    csv_file_name = 'glide_info_'+pilot_id+'.csv'
+    csv_file_name = os.path.join('temp', 'glide_info_'+pilot_id+'.csv')
     
     # Remove the last entry from the glide_info dictionary
     #glide_info.pop('Overall', None)
@@ -181,7 +181,7 @@ if task_finish_status == 'Task Completed':
     #thermal information
     
     # Specify the CSV file name
-    csv_file_name = 'thermal_info_'+pilot_id+'.csv'
+    csv_file_name = os.path.join('temp', 'thermal_info_'+pilot_id+'.csv')
     
 
 
@@ -201,7 +201,7 @@ if task_finish_status == 'Task Completed':
     
 
     # WRITE COMBINED INFO
-    csv_file_name = 'sequenceData_'+pilot_id+'.csv'
+    csv_file_name = os.path.join('temp', 'sequenceData_'+pilot_id+'.csv')
 
     # Open the CSV file in write mode
     with open(csv_file_name, 'w', newline='') as csv_file:
@@ -224,4 +224,3 @@ if task_finish_status == 'Task Completed':
 
 else:
     print(pilot_id,' did not finish the task so this calculation will not run')
-
