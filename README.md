@@ -2,7 +2,7 @@
 
 Copy .FPL file into the same folder as generateSummary.py
 
-For AAT tasks, use CoFliCo to convert FTR tracks as Condor Club .IGC files are missing task distance data. Or use aatConvert.py and manually add in AAT data from Condor.Club.
+For AAT tasks, use CoFliCo to convert FTR tracks to IGC files (as Condor Club .IGC files are missing AAT distance flown). Or use aatConvert.py and manually add in AAT data from Condor.Club.
 
 Run generateSummary.py to generate summary.csv for all .igc files inside the folder /igcFiles
 
