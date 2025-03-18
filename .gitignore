@@ -42,3 +42,7 @@ Thumbs.db
 /*.csv  # Only ignore CSV files in root directory
 /temp/*.csv  # Ignore CSV files in temp directory
 !polars/*.csv  # Keep polar CSV files
+
+# Generated files
+*.html
+task_analysis.log
