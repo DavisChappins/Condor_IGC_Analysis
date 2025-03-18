@@ -17,10 +17,110 @@ from formatExcel import *
 AAT = None  # Can be manually set to 1 for AAT, 0 for racing task, or None for auto-detection
 # To run an AAT analysis in Condor you must first add in condor.club results data using aatConvert.py
 
-tp_adjustment_km = -11
-# calculate turnpoint radius (if 360 circle) * num of TPs
-# example: triangle task with start line/finish line and 2 circular TPs of radius 3000m = 2*3km = -6km adjustment
-# (6 km less distance flown than to center of circle
+tp_adjustment_km = None  # Will be auto-calculated from FPL file. Can be manually set if needed.
+
+# Set up logging to both file and console
+import sys
+class TeeStream:
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.logfile = open(filename, 'w')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.logfile.write(message)
+        self.logfile.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.logfile.flush()
+
+def setup_logging():
+    log_file = "task_analysis.log"
+    sys.stdout = TeeStream(log_file)
+    print(f"Logging output to: {os.path.abspath(log_file)}\n")
+
+setup_logging()
+
+def calculate_tp_adjustment(fpl_lines):
+    """Calculate total TP adjustment (negative of total bonus distance) from FPL file content"""
+    import math
+    
+    def bearing(x1, y1, x2, y2):
+        dx = x2 - x1
+        dy = y2 - y1
+        angle = math.degrees(math.atan2(dx, dy))
+        if angle < 0:
+            angle += 360
+        return angle
+
+    # Parse turnpoints from FPL
+    turnpoints = []
+    tp_count = 0
+    
+    # First get number of turnpoints
+    for line in fpl_lines:
+        if line.startswith("Count="):
+            try:
+                tp_count = int(line.split("=")[1].strip())
+                break
+            except ValueError:
+                return 0
+    
+    # Then parse each turnpoint
+    current_tp = {}
+    for line in fpl_lines:
+        for i in range(tp_count):
+            if line.startswith(f"TPName{i}="):
+                current_tp = {'index': i, 'name': line.split("=")[1].strip()}
+            elif line.startswith(f"TPPosX{i}="):
+                current_tp['x'] = float(line.split("=")[1].strip())
+            elif line.startswith(f"TPPosY{i}="):
+                current_tp['y'] = float(line.split("=")[1].strip())
+            elif line.startswith(f"TPRadius{i}="):
+                current_tp['radius'] = float(line.split("=")[1].strip())
+            elif line.startswith(f"TPAngle{i}="):
+                current_tp['angle'] = float(line.split("=")[1].strip())
+                if len(current_tp) == 6:  # Have all required fields including name
+                    turnpoints.append(current_tp)
+                    current_tp = {}
+    
+    print("\nCalculating TP adjustments:")
+    print("-" * 50)
+    
+    # Calculate bonus distances for each turnpoint
+    total_bonus = 0
+    for i in range(1, len(turnpoints)-1):  # Skip first (start) and handle last separately
+        tp = turnpoints[i]
+        tp_bonus = 0
+        if abs(tp['angle'] - 360) <= 1e-2:  # Only if it's a full cylinder
+            if i == 1:  # Start line
+                tp_bonus = tp['radius'] / 1000.0
+                print(f"Start ({tp['name']}): {tp_bonus:.2f} km bonus (radius = {tp['radius']/1000:.2f} km)")
+            else:
+                # Calculate effective angle for regular turnpoint
+                inc = bearing(turnpoints[i-1]['x'], turnpoints[i-1]['y'], tp['x'], tp['y'])
+                out = bearing(tp['x'], tp['y'], turnpoints[i+1]['x'], turnpoints[i+1]['y'])
+                raw_diff = abs(out - inc)
+                eff_angle = raw_diff if raw_diff <= 180 else 360 - raw_diff
+                tp_bonus = 2 * (tp['radius'] / 1000.0) * math.sin(math.radians(eff_angle / 2))
+                print(f"TP {i} ({tp['name']}): {tp_bonus:.2f} km bonus (radius = {tp['radius']/1000:.2f} km, angle = {eff_angle:.1f}°)")
+            total_bonus += tp_bonus
+    
+    # Handle finish (last turnpoint)
+    if len(turnpoints) > 0:
+        last_tp = turnpoints[-1]
+        if abs(last_tp['angle'] - 360) <= 1e-2:
+            tp_bonus = last_tp['radius'] / 1000.0
+            print(f"Finish ({last_tp['name']}): {tp_bonus:.2f} km bonus (radius = {last_tp['radius']/1000:.2f} km)")
+            total_bonus += tp_bonus
+    
+    print("-" * 50)
+    print(f"Total bonus distance: {total_bonus:.2f} km")
+    print(f"Final TP adjustment: {-total_bonus:.2f} km")
+    print("")
+    
+    return -total_bonus  # Return negative of total bonus
 
 ##################    VARIABLES     ####################
 
@@ -71,6 +171,15 @@ if fpl_files:
         AAT = aat_detected if aat_detected is not None else 0
         if aat_detected is None:
             print("Warning: Could not detect task type in FPL file. Defaulting to Racing Task.")
+
+    # Calculate TP adjustment if not manually set
+    if tp_adjustment_km is None:
+        if AAT == 1:
+            tp_adjustment_km = 0  # No adjustment for AAT tasks
+            print("AAT task detected - no TP adjustment applied")
+        else:
+            tp_adjustment_km = calculate_tp_adjustment(lines)
+            print(f"TP adjustment calculated from FPL: {tp_adjustment_km:.2f} km")
 
     # --- Get TPHeight1 for start height ---
     for line in lines:
