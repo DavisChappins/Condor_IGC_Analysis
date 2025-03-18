@@ -38,4 +38,6 @@ Thumbs.db
 
 # Temporary files
 *.igc
+*.xlsx
+*.csv
 !polars/*.csv  # Keep polar CSV files

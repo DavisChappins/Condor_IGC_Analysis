@@ -14,7 +14,7 @@ from formatExcel import *
 
 ##################    VARIABLES     ####################
 
-AAT = 0  # set to 1 if AAT, set to 0 if racing task
+AAT = None  # Can be manually set to 1 for AAT, 0 for racing task, or None for auto-detection
 # To run an AAT analysis in Condor you must first add in condor.club results data using aatConvert.py
 
 tp_adjustment_km = -11
@@ -46,13 +46,31 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 # --- Optional Section: Read the .fpl file to get TPHeight1 value FPL must be in local folder---
 task_start_height_ft = None
 task_finish_height_ft = None
+aat_detected = None
 
 fpl_files = glob.glob(os.path.join(script_dir, "*.fpl"))
 if fpl_files:
     fpl_file = fpl_files[0]
     with open(fpl_file, "r") as f:
-        # Read all lines so we can process both TPHeight1 and TPWidth*
+        # Read all lines so we can process both TPHeight1, TPWidth* and AAT status
         lines = f.readlines()
+
+    # --- Check if task is AAT ---
+    for line in lines:
+        if line.strip() == "AAT=1":
+            aat_detected = 1
+            print("Task type detected: AAT (Assigned Area Task)")
+            break
+        elif line.strip() == "AAT=0":
+            aat_detected = 0
+            print("Task type detected: Racing Task")
+            break
+
+    # If AAT is not manually set, use the detected value
+    if AAT is None:
+        AAT = aat_detected if aat_detected is not None else 0
+        if aat_detected is None:
+            print("Warning: Could not detect task type in FPL file. Defaulting to Racing Task.")
 
     # --- Get TPHeight1 for start height ---
     for line in lines:

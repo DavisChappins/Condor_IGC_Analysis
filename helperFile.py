@@ -1764,7 +1764,7 @@ def determine_if_task_completed(igc_data):
     for line in igc_data:
         if 'LCONFlightInfoPlayerStatus=' in line:
             equal_index = line.index('=')
-            finished_yes_no = line[equal_index + 1:].strip()
+            finished_yes_no = line[equal_index + 1:].strip().upper()
             if finished_yes_no == 'FINISHED':
                 finish_status = 'Task Completed'
             else:
