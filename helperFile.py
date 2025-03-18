@@ -7,9 +7,50 @@ import csv
 import pandas as pd
 import os
 import glob
+import numpy as np
 
+# Constants for energy calculations
+IDEAL_START_SPEED_KTS = 91.7927
+IDEAL_FINISH_SPEED_KTS = 60.0
+TE_CORRECTION_FACTOR = 0.8
+GRAVITY_MPS2 = 9.81
 
-
+def calculate_energy_height_difference(actual_height_ft: float, actual_speed_kts: float, 
+                                    perfect_height_ft: float, perfect_speed_kts: float,
+                                    is_finish: bool = False) -> float:
+    """
+    Calculate the energy height difference between actual and perfect conditions.
+    
+    Parameters:
+        actual_height_ft (float): The actual height in feet
+        actual_speed_kts (float): The actual speed in knots
+        perfect_height_ft (float): The perfect/ideal height in feet
+        perfect_speed_kts (float): The perfect/ideal speed in knots
+        is_finish (bool): If True, this is a finish calculation and the result will be inverted
+        
+    Returns:
+        float: The energy height difference in feet
+    """
+    # Convert speeds from knots to m/s (1 knot = 0.514444 m/s)
+    actual_speed_mps = actual_speed_kts * 0.514444
+    perfect_speed_mps = perfect_speed_kts * 0.514444
+    
+    # Convert heights from feet to meters (1 foot = 0.3048 meters)
+    actual_height_m = actual_height_ft * 0.3048
+    perfect_height_m = perfect_height_ft * 0.3048
+    
+    # Calculate energy height difference in meters
+    energy_height_diff = (perfect_height_m + TE_CORRECTION_FACTOR * (perfect_speed_mps**2 / (2 * GRAVITY_MPS2))) - \
+                        (actual_height_m + TE_CORRECTION_FACTOR * (actual_speed_mps**2 / (2 * GRAVITY_MPS2)))
+    
+    # Convert back to feet
+    energy_height_diff_ft = energy_height_diff * 3.28084
+    
+    # For finish calculations, invert the result
+    if is_finish:
+        energy_height_diff_ft = -energy_height_diff_ft
+        
+    return energy_height_diff_ft
 
 
 def convert_seconds_to_mmss(overall_time_s):
@@ -949,7 +990,7 @@ def calculate_MC_equivalent(flight_data, igc_data):
             
             #return result
     #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
+    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
     MC_table = []
 
     with open(file_path, 'r') as file:
@@ -1200,10 +1241,11 @@ def thermal_sequence(thermal_data):
             print(f"No data for {key}.")
             thermal_info[key] = None
         else:
-            # Extract altitude, time, and speed data from thermal_data[key]
+            # Extract altitude, time, speed, and heading data from thermal_data[key]
             altitudes = [row[5] for row in data]
             times = list(range(len(data)))
             speeds_kmh = [row[9] for row in data]
+            headings_deg = [row[7] for row in data]
 
             # Calculate average rate of climb
             if times[-1] != 0:
@@ -1394,8 +1436,10 @@ def glide_sequence(glide_data):
 
     def convert_lat_lon_to_decimal(lat_str, lon_str):
         lat_dir, lon_dir = lat_str[-1], lon_str[-1]
-        lat_deg, lon_deg = float(lat_str[:2]), float(lon_str[:3])
-        lat_min, lon_min = float(lat_str[2:4] + '.' + lat_str[4:-1]), float(lon_str[3:5] + '.' + lon_str[5:-1])
+        lat_deg = float(lat_str[:2])
+        lon_deg = float(lon_str[:3])
+        lat_min = float(lat_str[2:4] + '.' + lat_str[4:7])
+        lon_min = float(lon_str[3:5] + '.' + lon_str[5:8])
         lat_decimal = lat_deg + lat_min / 60
         lon_decimal = lon_deg + lon_min / 60
         lat_decimal = lat_decimal if lat_dir.upper() == 'N' else -lat_decimal
@@ -1628,7 +1672,7 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
             
             #return result
     #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
+    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
     MC_table = []
 
     with open(file_path, 'r') as file:
@@ -1720,7 +1764,7 @@ def determine_if_task_completed(igc_data):
     for line in igc_data:
         if 'LCONFlightInfoPlayerStatus=' in line:
             equal_index = line.index('=')
-            finished_yes_no = line[equal_index + 1:].strip()
+            finished_yes_no = line[equal_index + 1:].strip().upper()
             if finished_yes_no == 'FINISHED':
                 finish_status = 'Task Completed'
             else:
@@ -1829,11 +1873,15 @@ def calculate_groundspeed_frequency(glide_data):
 
     return freq_gs_kts
 
-
-
 def delete_csv_files_with_prefix(prefix):
+    """
+    Delete all CSV files in the temp directory that start with the given prefix.
+    
+    Parameters:
+        prefix (str): The prefix to match against file names
+    """
     # Create a pattern to match CSV files starting with the specified prefix
-    pattern = f'{prefix}*.csv'
+    pattern = os.path.join('temp', f'{prefix}*.csv')
 
     # Use glob to find all matching files
     files_to_delete = glob.glob(pattern)
