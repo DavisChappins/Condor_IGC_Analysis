@@ -35,8 +35,8 @@ def format_excel_from_csv(csv_file, final_excel_file):
     ws = wb.active  # Use the active sheet
 
     # Define columns for the two color scales
-    columns_red_to_green = ["D", "H", "K", "U", "Y"]  # Low = Red, High = Green
-    columns_green_to_red = ["Q"]            # Low = Green, High = Red
+    columns_red_to_green = ["E", "I", "L", "V", "Z"]  # Low = Red, High = Green
+    columns_green_to_red = ["R"]            # Low = Green, High = Red
 
     # Color scale 1: Classic red-to-green with white midpoint
     color_scale_red_to_green = ColorScaleRule(

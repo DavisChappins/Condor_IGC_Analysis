@@ -1,0 +1,67 @@
+# Project-specific directories
+temp/
+venv/
+__pycache__/
+.history/
+
+# Python-specific
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.igc
+*.xlsx
+/*.csv  # Only ignore CSV files in root directory
+/temp/*.csv  # Ignore CSV files in temp directory
+!polars/*.csv  # Keep polar CSV files
+
+# Generated files
+*.html
+task_analysis.log
+test_ballast.py
+helperFile_wingloading.py
+helperFile_quadratic.py
+1.fpl
+Condor_IGC_Analysis.code-workspace
+create_polar_csv.py
+groundspeed_vs_percent_time_spent.html
+slim_summary_gap_analysis.csv
+slim_summary_rules.csv
+slim_summary_timing.csv
+slim_summary.csv
+summary.csv
+summaryClimb_interactive.html
+.gitignore
+slim_summary_rules.csv
+summaryClimb_interactive.html
+groundspeed_vs_percent_time_spent.html
+groundspeed_vs_percent_time_spent.html
+slim_summary_rules.csv

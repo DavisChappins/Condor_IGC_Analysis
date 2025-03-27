@@ -1,5 +1,7 @@
 # Condor IGC Analysis
 
+Copy .FPL file into the same folder as generateSummary.py
+For AAT tasks, use CoFliCo to convert FTR tracks as Condor Club .IGC files are missing task distance data. Or use aatConvert.py and manually add in AAT data from Condor.Club.
 Run generateSummary.py to generate summary.csv for all .igc files inside the folder /igcFiles  
 All of the data is from task start to task finish
 
@@ -48,11 +50,3 @@ These are the only ways to fly faster than another glider. The columns analyze t
 **Rule2_time_behind_best_climb_mmss** time lost due to climb rate difference from the best climb rate pilot of the day in mm ss  
 **Rule3_absolute_time_lost_mmss** time lost due to flying a longer distance than the task distance in mm ss  
 **Rule3_time_behind_straightest_mmss** time lost due to flying a longer distance behind the shortest flight in mm ss  
-
-
-
-
-
-# AAT  
-
-To analyze AAT tasks you must open the igcFiles_aat folder, place igc files in there, open aatConvert.py, add in the AAT specific data from Condor.Club, run that file to modify the igc files, move the modified igc files into the igcFiles folder, then run generateSummary.py with AAT = 1 set on line 15.

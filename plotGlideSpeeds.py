@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import glob
+import os
 
 def interleave_list(lst):
     """
@@ -24,7 +25,7 @@ def interleave_list(lst):
 
 def plot_freq_vs_groundspeed():
     # Find all CSV files that match the pattern 'freq_gs_kts*.csv'
-    csv_files = glob.glob('freq_gs_kts*.csv')
+    csv_files = glob.glob(os.path.join('temp', 'freq_gs_kts*.csv'))
 
     # Read summary data to determine the order of datasets
     try:
