@@ -2417,3 +2417,23 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed_kts, climbrate_kts):
     except Exception as e:
         print(f"Error in ideal_MC_given_avg_ias_kts: {e}")
         return None, None, None
+
+def get_glider_type(igc_data):
+    """
+    Extract glider type from IGC data.
+    
+    Args:
+        igc_data (list): List of strings representing lines from an IGC file.
+        
+    Returns:
+        str: Glider type or "Unknown Glider" if not found
+    """
+    glider_type = "Unknown Glider"
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_type = line[index + 1:].strip()
+            except (ValueError, IndexError):
+                pass
+    return glider_type

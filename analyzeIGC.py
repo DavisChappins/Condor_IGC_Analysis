@@ -22,6 +22,9 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
     pilot_id = get_pilot_cn_and_name(igc_data)
     print("pilot_id",pilot_id)
 
+    glider_type = get_glider_type(igc_data)
+    print("glider_type",glider_type)
+
     task_finish_status = determine_if_task_completed(igc_data)
 
     if task_finish_status == 'Task Completed':
@@ -260,7 +263,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
 
 
         # Define column names and data row
-        columns = ["Name",
+        columns = ["Name", "Glider Type",
                    "Rule1_glide_avg_gs_kts", "Rule1_glide_avg_ias_kts", "Rule1_glide_ratio", "Rule1_glide_ratio_better_actual_MC","Rule1_ideal_MC_ias_given_avg_climb_kts", "Rule1_glide_avg_dist_nmi",
                    "Rule1_avg_glide_netto_kt", "Rule1_%_of_glide_netto_positive", "Rule1_%_of_glide_sinkrate_positive",
                    "Rule2_avg_climb_rate_kts", "Rule2_actual_MC_given_avg_ias_kts", "Num_useful_thermals", "Num_discarded_thermals_<75s_or_<500ft","Percent_discarded_thermals",
@@ -271,7 +274,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
                    "task_speed_kmh", "task_distance_km","task_time_hmmss", "total_glide_time_mmss", "total_thermal_time_mmss"
                    ]
 
-        row_data = [pilot_id,
+        row_data = [pilot_id, glider_type,
                    Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_dist_nmi,
                    avg_netto_kt, percent_glide_netto_positive, percent_glide_sinkrate_positive,
                    Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, useful_thermals, discarded_thermals, thermal_discard_percent,
@@ -344,10 +347,9 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
         print(f'The data has been written to {csv_file_name}.')
 
-
         order_csv_by_starting_utc(csv_file_name)
 
-        return [pilot_id,
+        return [pilot_id, glider_type,
                 Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts,
                 Rule1_glide_avg_dist_nmi,Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, Rule3_total_glide_distance_nmi,
                 Rule3_total_glide_more_percent, Rule4_avg_altitude_ft, start_speed_gs_kts, start_altitude_ft,
@@ -359,4 +361,3 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
     return
         
-    
