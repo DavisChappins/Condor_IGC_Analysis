@@ -121,27 +121,14 @@ def Rule2_add_time_delta(csv_file_path):
         climb_rate_loss_mmss = '{:02}:{:02}'.format(int(climb_rate_loss_seconds // 60), int(climb_rate_loss_seconds % 60))
         entry['Rule2_time_behind_best_climb_mmss'] = "'" + climb_rate_loss_mmss
 
-    # Get rank 1's climb rate and thermal time
-    rank1_climb_rate = float(summary[0]['Rule2_avg_climb_rate_kts'])
-    rank1_mmss = summary[0]['total_thermal_time_mmss'][1:]  # Remove leading quote
-    rank1_minutes, rank1_seconds = map(int, rank1_mmss.split(':'))
-    rank1_thermal_time = rank1_minutes * 60 + rank1_seconds
-    
-    # Calculate how long it would take this pilot to gain rank1's height
+    # Compute delta relative to the rank 1 (first) entry
+    rank1_loss = rule2_loss_seconds[0]
     rule2_time_behind_rank1_list = []
-    for entry in summary:
-        pilot_climb_rate = float(entry['Rule2_avg_climb_rate_kts'])
-        if pilot_climb_rate == 0:
-            effective_time = rank1_thermal_time
-        else:
-            effective_time = rank1_thermal_time * (rank1_climb_rate / pilot_climb_rate)
-            
-        # Time behind rank1 is how much longer it would take
-        delta = effective_time - rank1_thermal_time
-        mm = int(abs(delta) // 60)
-        ss = int(abs(delta) % 60)
-        sign = '-' if delta < 0 else ''
-        rule2_time_behind_rank1_list.append("'" + sign + '{:02}:{:02}'.format(mm, ss))
+    for loss in rule2_loss_seconds:
+        delta = loss - rank1_loss
+        mm = int(delta // 60)
+        ss = int(delta % 60)
+        rule2_time_behind_rank1_list.append("'" + '{:02}:{:02}'.format(mm, ss))
 
     # Update header with new columns if they don't exist
     new_cols = ['Rule2_time_behind_best_climb_mmss', 'Rule2_time_behind_rank1']
@@ -462,7 +449,6 @@ def Rule1_add_time_delta(csv_file_path):
             hours = ld_time_diff_s // 3600
             minutes = (ld_time_diff_s) // 60
             seconds = ld_time_diff_s % 60
-            ld_time_diff_s = -ld_time_diff_s
             ld_time_diff_mmss = "-{:02}:{:02}".format(int(minutes), int(seconds))
 
         ld_time_diff_mmss_values.append("'" + ld_time_diff_mmss)

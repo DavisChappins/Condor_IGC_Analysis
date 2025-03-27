@@ -15,6 +15,12 @@ IDEAL_FINISH_SPEED_KTS = 60.0
 TE_CORRECTION_FACTOR = 0.8
 GRAVITY_MPS2 = 9.81
 
+# Conversion factors
+KMH_TO_MPS = 1000 / 3600  # km/h to m/s
+MPS_TO_KTS = 1.94384      # m/s to knots
+KMH_TO_KTS = 0.539957     # km/h to knots
+MPS_TO_KMH = 3.6          # m/s to km/h
+
 def calculate_energy_height_difference(actual_height_ft: float, actual_speed_kts: float, 
                                     perfect_height_ft: float, perfect_speed_kts: float,
                                     is_finish: bool = False) -> float:
@@ -975,55 +981,6 @@ def calculate_ias_kt(flight_data):
         
         flight_data[i][17] = str(ias_kt)
 
-
-def calculate_MC_equivalent(flight_data, igc_data):
-    #find glider class in igc file
-    for line in igc_data:
-        if 'LCONFPLName=' in line:
-            # Find the index of '=' and return the substring after it
-            index = line.index('=')
-            glider_class =  line[index + 1:].strip()
-        
-            # Append '.csv' onto the end of the result
-            glider_class += '.csv'
-            print(glider_class)
-            
-            #return result
-    #use glider_class in csv lookup
-    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
-    MC_table = []
-
-    with open(file_path, 'r') as file:
-        csv_reader = csv.reader(file)
-        for row in csv_reader:
-            MC_table.append(row)
-    #print(MC_table)
-    
-    #use MC_table to lookup
-    for i in range(1, len(flight_data)):
-        # Assuming IAS_kt is at index 17 in each sublist of flight_data
-        ias_kt = flight_data[i][17]
-
-        # Convert IAS_kt to float for comparison
-        ias_kt = float(ias_kt)
-
-        # Initialize variables to keep track of the closest match
-        closest_diff = float('inf')
-        closest_row = None
-
-        # Iterate through MC_table starting from the second row (index 1) for airspeed
-        for row in MC_table[1:]:
-            current_diff = abs(ias_kt - float(row[1]))
-            if current_diff < closest_diff:
-                closest_diff = current_diff
-                closest_row = row
-
-        # Update flight_data with the MC LD value    
-        flight_data[i][18] = closest_row[2]
-        
-        # Update flight_data with the MC sinkrate value    
-        flight_data[i][19] = closest_row[3]
-    
 def calculate_netto(flight_data):
     for i in range(2, len(flight_data)):
         # Check if flight_data[i][11] contains "Glide"
@@ -1656,60 +1613,6 @@ def MC_lookup(airspeed, MC_table):
 
     return float(closest_row[0])
 
-
-
-def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
-    #find glider class in igc file
-    for line in igc_data:
-        if 'LCONFPLName=' in line:
-            # Find the index of '=' and return the substring after it
-            index = line.index('=')
-            glider_class =  line[index + 1:].strip()
-        
-            # Append '.csv' onto the end of the result
-            glider_class += '.csv'
-            #print(glider_class)
-            
-            #return result
-    #use glider_class in csv lookup
-    file_path = os.path.join("polars", glider_class) #"18-meter.csv" #uses JS3 at max gross because thats the best
-    MC_table = []
-
-    with open(file_path, 'r') as file:
-        csv_reader = csv.reader(file)
-        for row in csv_reader:
-            MC_table.append(row)
-    #print(MC_table)
-    
-    # Convert to float for comparison
-    airspeed = float(airspeed)
-    climbrate = float(climbrate)
-
-    # Initialize variables to keep track of the closest match
-    closest_diff = float('inf')
-    closest_row = None
-
-    # Iterate through MC_table starting from the second row (index 1) for airspeed
-    for row in MC_table[1:]:
-        current_diff = abs(airspeed - float(row[1]))
-        if current_diff < closest_diff:
-            closest_diff = current_diff
-            closest_row_airspeed = row
-            #print('closest_row_airspeed',closest_row_airspeed)
-            
-    # Initialize variables to keep track of the closest match
-    closest_diff = float('inf')
-    closest_row = None
-    
-    # Iterate through MC_table starting from the second row (index 1) for MC setting
-    for row in MC_table[1:]:
-        current_diff = abs(climbrate - float(row[0]))
-        if current_diff < closest_diff:
-            closest_diff = current_diff
-            closest_row_climbrate = row    
-
-    return float(closest_row_airspeed[0]), float(closest_row_climbrate[1]), float(closest_row_airspeed[2])
-
 def get_pilot_cn_and_name(igc_data):
     pilot_name = None
     competition_id = None
@@ -1893,3 +1796,624 @@ def delete_csv_files_with_prefix(prefix):
             print(f"Deleted: {file_path}")
         except Exception as e:
             print(f"Error deleting {file_path}: {e}")
+
+
+
+
+# Conversion factors
+KMH_TO_MPS = 1000 / 3600  # km/h to m/s
+MPS_TO_KTS = 1.94384      # m/s to knots
+KMH_TO_KTS = 0.539957     # km/h to knots
+
+# Example usage:
+# table = generate_MC_table_from_plr("ASW20")
+def extract_ballast(igc_data):
+    """
+    Extracts water ballast and fixed ballast from IGC data lines.
+
+    Args:
+        igc_data (list): A list of strings representing lines from an IGC file.
+
+    Returns:
+        float: Total ballast in kilograms. Returns 0 if lines are not found or values are invalid.
+    """
+    water_ballast = 0.0
+    fixed_ballast = 0.0
+    found_water = False
+    found_fixed = False
+
+    for line in igc_data:
+        try:
+            if line.startswith("LCONFPLWater="):
+                water_ballast = float(line.split("=")[1].strip())
+                found_water = True
+                #print(f"Found Water Ballast: {water_ballast} kg") # Debug
+            elif line.startswith("LCONFPLfixedMass="):
+                fixed_ballast = float(line.split("=")[1].strip())
+                found_fixed = True
+                #print(f"Found Fixed Mass: {fixed_ballast} kg") # Debug
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Could not parse ballast line: {line.strip()} - {e}")
+            # Continue searching even if one line fails
+
+        if found_water and found_fixed:
+            break # Stop searching once both are found
+
+    if not found_water:
+        print("Warning: LCONFPLWater= line not found in IGC data. Assuming 0 water ballast.")
+    if not found_fixed:
+        print("Warning: LCONFPLfixedMass= line not found in IGC data. Assuming 0 fixed ballast.")
+
+    total_ballast = water_ballast + fixed_ballast
+    print(f"Total Ballast Calculated: {total_ballast:.2f} kg (Water: {water_ballast}, Fixed: {fixed_ballast})")
+    return total_ballast
+
+def parse_polar_file(content):
+    """
+    Parses a polar file (ignoring lines starting with '*') and returns a dictionary with:
+      - mass, max_water_ballast, polar_speeds (km/h), polar_sinks (m/s), wing_area.
+    """
+    lines = [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('*')]
+    if not lines:
+        print("Error: No valid data lines found in polar file content.")
+        return None
+    try:
+        values = [float(val.strip()) for val in lines[0].split(',')]
+    except Exception as e:
+        print(f"Error parsing polar values from line '{lines[0]}': {e}")
+        return None
+        
+    if len(values) >= 9:
+        polar_dict = {
+            'mass': values[0], # This is MassDryGross
+            'max_water_ballast': values[1],
+            'polar_speeds': [values[2], values[4], values[6]],  # in km/h
+            'polar_sinks': [values[3], values[5], values[7]],     # in m/s
+            'wing_area': values[8]
+        }
+        # Basic validation
+        if polar_dict['wing_area'] <= 0:
+            print(f"Error: Invalid Wing Area ({polar_dict['wing_area']}) in polar file.")
+            return None
+        if polar_dict['mass'] <= 0:
+            print(f"Error: Invalid MassDryGross ({polar_dict['mass']}) in polar file.")
+            return None
+        return polar_dict
+    else:
+        print(f"Error: Insufficient values on data line in polar file. Expected >= 9, got {len(values)}.")
+        return None
+
+
+# MODIFIED FUNCTION
+def generate_MC_table_from_plr(glider_class, igc_data, mc_range=(0, 12), mc_step=0.01):
+    """
+    Generate an MC (MacCready) table from a .plr file, adjusting for wing loading.
+
+    Reads ballast from igc_data, adjusts polar points based on actual wing loading,
+    fits a quadratic to the adjusted points, and then calculates the MC table using
+    a direct mathematical formula (tangent method).
+
+    Args:
+        glider_class (str): The name of the glider (e.g., "JS1-18").
+        igc_data (list): List of strings from the IGC file.
+        mc_range (tuple): Min and max MC values (knots) for the table.
+        mc_step (float): Step size for MC values (knots).
+
+    Returns:
+        list: A list of lists, where each inner list is [MC (kts), Speed (kts), L/D, Sink (kts)],
+              or None if an error occurs.
+    """
+    file_path = os.path.join("polars", f"{glider_class}.plr")
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        # print(f"Successfully opened polar file: {file_path}") # Keep for debug if needed
+    except Exception as e:
+        print(f"Error opening polar file {file_path}: {e}")
+        return None
+
+    polar = parse_polar_file(content)
+    if not polar:
+        print(f"Error: Could not parse polar file for {glider_class}.")
+        return None
+    # print(f"Parsed polar data for {glider_class}: {polar}") # Keep for debug if needed
+
+    # Extract ballast and calculate actual wing loading
+    ballast = extract_ballast(igc_data)
+    reference_mass = polar['mass'] # MassDryGross from polar file
+    actual_mass = reference_mass + ballast
+    wing_area = polar['wing_area']
+
+    if wing_area <= 0:
+        print(f"Error: Wing area is zero or negative ({wing_area}). Cannot calculate loading.")
+        return None
+
+    reference_loading = reference_mass / wing_area
+    actual_loading = actual_mass / wing_area
+    # Print loading info (optional, can be commented out for cleaner output)
+    # print(f"Reference Mass: {reference_mass:.2f} kg, Ballast: {ballast:.2f} kg, Actual Mass: {actual_mass:.2f} kg")
+    # print(f"Wing Area: {wing_area:.2f} m²")
+    # print(f"Reference Loading: {reference_loading:.2f} kg/m²")
+    # print(f"Actual Loading: {actual_loading:.2f} kg/m²")
+
+    if reference_loading <= 0:
+         print(f"Error: Reference loading is zero or negative ({reference_loading}). Cannot calculate scale factor.")
+         return None
+
+    # Calculate scale factor and adjust polar points
+    try:
+        scale_factor = sqrt(actual_loading / reference_loading)
+        # print(f"Wing Loading Scale Factor: {scale_factor:.4f}") # Keep for debug if needed
+    except ValueError:
+         print(f"Error: Cannot calculate scale factor (sqrt of negative number?) - Loading issue.")
+         return None
+
+    # Adjust speeds and sinks
+    adj_speeds_kmh = [s * scale_factor for s in polar['polar_speeds']]
+    adj_sinks_ms = [s * scale_factor for s in polar['polar_sinks']]
+    # print(f"Adjusted Speeds (km/h): {[round(s, 2) for s in adj_speeds_kmh]}") # Keep for debug if needed
+    # print(f"Adjusted Sinks (m/s): {[round(s, 3) for s in adj_sinks_ms]}")    # Keep for debug if needed
+
+    # Convert adjusted speeds to m/s for fitting
+    adj_speeds_mps = [s * KMH_TO_MPS for s in adj_speeds_kmh]
+
+    # Fit a quadratic polynomial to the *adjusted* polar data
+    try:
+        coeffs = np.polyfit(adj_speeds_mps, adj_sinks_ms, 2)
+        # print(f"Fitted Quadratic Coefficients (a, b, c) on adjusted data: {coeffs}") # Keep for debug if needed
+    except Exception as e:
+        print(f"Error fitting quadratic to adjusted polar data: {e}")
+        return None
+    # The fitted quadratic is: sink = a*v² + b*v + c, where v is in m/s.
+    a_adj, b_adj, c_adj = coeffs[0], coeffs[1], coeffs[2]
+
+    # Determine speed for minimum sink (used as fallback)
+    # Min sink occurs at v = -b / (2*a)
+    if abs(a_adj) > 1e-9:
+        v_min_sink_mps = -b_adj / (2 * a_adj)
+        # Ensure min sink speed is within a reasonable range based on adjusted polar points
+        min_adj_speed_mps = min(adj_speeds_mps) if adj_speeds_mps else 0
+        max_adj_speed_mps = max(adj_speeds_mps) if adj_speeds_mps else v_min_sink_mps # Avoid error if list empty
+        v_min_sink_mps = max(min_adj_speed_mps, min(max_adj_speed_mps, v_min_sink_mps))
+    else:
+        # Handle case where 'a' is near zero (linear fit approximation)
+        print("Warning: Coefficient 'a' is near zero. Min sink calculation might be unstable.")
+        # Fallback: use the speed corresponding to the lowest point in the adjusted input data
+        if adj_speeds_mps and adj_sinks_ms:
+             min_sink_index = np.argmin(adj_sinks_ms)
+             v_min_sink_mps = adj_speeds_mps[min_sink_index]
+        else:
+             v_min_sink_mps = 0 # Further fallback if adjusted points are missing
+
+    MC_table = []
+    # Loop over MC values (in knots) as provided
+    for mc in np.arange(mc_range[0], mc_range[1] + mc_step, mc_step):
+        # Convert MC from knots to m/s.
+        mc_mps = mc / MPS_TO_KTS
+
+        v_opt_mps = None # Initialize optimal speed
+
+        # --- Direct Mathematical Calculation ---
+        if mc_mps <= 0:
+            # For MC=0 or less, the optimal speed is the speed for minimum sink
+            v_opt_mps = v_min_sink_mps
+            # print(f"MC={mc:.2f} <= 0, using V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+        else:
+            # Check if 'a' is significantly non-zero
+            if abs(a_adj) > 1e-9:
+                # Calculate the term inside the square root for the tangent formula
+                ratio_term = (c_adj - mc_mps) / a_adj
+                # print(f"MC={mc:.2f}, ratio_term = ({c_adj:.3f} - {mc_mps:.3f}) / {a_adj:.5f} = {ratio_term:.3f}") # Debug
+
+                if ratio_term >= 0:
+                     # Standard tangent formula applies
+                     v_opt_mps = sqrt(ratio_term)
+                     # print(f"  Calculated v_opt_mps = sqrt({ratio_term:.3f}) = {v_opt_mps:.2f} m/s") # Debug
+                else:
+                     # If ratio_term is negative, it means the MC value is high,
+                     # and the tangent point is beyond the vertex.
+                     # The optimal speed mathematically approaches infinity, but practically
+                     # limited. Fallback to speed for minimum sink as a reasonable guess,
+                     # although this isn't strictly the tangent point anymore.
+                     # Some sources might suggest extrapolating, but using V_min_sink is safer
+                     # given the limited input points.
+                     v_opt_mps = v_min_sink_mps
+                     # print(f"  Ratio term negative, falling back to V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+            else:
+                # If 'a' is near zero, the polar is nearly linear. The optimal speed
+                # would theoretically be very high. Fallback to V_min_sink.
+                 v_opt_mps = v_min_sink_mps
+                 # print(f"MC={mc:.2f}, a_adj near zero, falling back to V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+
+        # --- Calculation finished, now calculate results ---
+
+        # Calculate sink rate at the optimal speed using the adjusted quadratic coefficients
+        sink_mps = a_adj * v_opt_mps**2 + b_adj * v_opt_mps + c_adj
+
+        # Ensure sink rate is negative for L/D calculation consistency
+        if sink_mps >= 0:
+             # This might happen due to numerical precision or if V_min_sink itself is slightly positive
+             # Force a small negative value to avoid division by zero in L/D and represent descent
+             sink_mps = -0.001
+             # print(f"  Calculated sink non-negative ({sink_mps:.3f}), forcing to -0.001 m/s") # Debug
+
+        # L/D ratio computed using m/s values at the optimal point
+        # We use abs(sink_mps) because sink is negative (down)
+        ld = abs(v_opt_mps / sink_mps) if abs(sink_mps) > 1e-6 else 0
+
+        # Convert optimal speed (m/s) to km/h and then to knots
+        speed_kmh = v_opt_mps * MPS_TO_KMH
+        speed_kts = speed_kmh * KMH_TO_KTS
+
+        # Convert optimal sink rate (m/s) to knots
+        sink_kts = sink_mps * MPS_TO_KTS
+
+        MC_table.append([mc, speed_kts, ld, sink_kts])
+        # print(f"  Added to table: MC={mc:.2f}, Spd={speed_kts:.2f}, LD={ld:.2f}, Sink={sink_kts:.2f}") # Debug
+
+    # --- [ Debug printing of the table remains the same ] ---
+    print("-" * 50)
+    print(f"Generated MC Table for {glider_class} (Adjusted for WL={actual_loading:.2f} kg/m²)")
+    header = "{:>6} | {:>10} | {:>8} | {:>10}".format("MC_kts", "Speed_kts", "L/D", "Sink_kts")
+    print(header)
+    print("-" * len(header))
+    # Determine how many rows to print at start/end
+    num_rows_display = 5
+    if len(MC_table) <= 2 * num_rows_display:
+        for row in MC_table:
+             print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    else:
+        for row in MC_table[:num_rows_display]: # Print first N rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+        print("  ...")
+        for row in MC_table[-num_rows_display:]: # Print last N rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    print("-" * 50)
+
+    return MC_table
+
+    """
+    Generate an MC (MacCready) table from a .plr file, adjusting for wing loading.
+
+    Reads ballast from igc_data, adjusts polar points based on actual wing loading,
+    fits a quadratic to the adjusted points, and then calculates the MC table.
+
+    Args:
+        glider_class (str): The name of the glider (e.g., "JS1-18").
+        igc_data (list): List of strings from the IGC file.
+        mc_range (tuple): Min and max MC values (knots) for the table.
+        mc_step (float): Step size for MC values (knots).
+
+    Returns:
+        list: A list of lists, where each inner list is [MC (kts), Speed (kts), L/D, Sink (kts)],
+              or None if an error occurs.
+    """
+    file_path = os.path.join("polars", f"{glider_class}.plr")
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        print(f"Successfully opened polar file: {file_path}")
+    except Exception as e:
+        print(f"Error opening polar file {file_path}: {e}")
+        return None
+
+    polar = parse_polar_file(content)
+    if not polar:
+        print(f"Error: Could not parse polar file for {glider_class}.")
+        return None
+    print(f"Parsed polar data for {glider_class}: {polar}")
+
+    # Extract ballast and calculate actual wing loading
+    ballast = extract_ballast(igc_data)
+    reference_mass = polar['mass'] # MassDryGross from polar file
+    actual_mass = reference_mass + ballast
+    wing_area = polar['wing_area']
+
+    if wing_area <= 0:
+        print(f"Error: Wing area is zero or negative ({wing_area}). Cannot calculate loading.")
+        return None
+        
+    reference_loading = reference_mass / wing_area
+    actual_loading = actual_mass / wing_area
+    print(f"Reference Mass: {reference_mass:.2f} kg, Ballast: {ballast:.2f} kg, Actual Mass: {actual_mass:.2f} kg")
+    print(f"Wing Area: {wing_area:.2f} m²")
+    print(f"Reference Loading: {reference_loading:.2f} kg/m²")
+    print(f"Actual Loading: {actual_loading:.2f} kg/m²")
+
+
+    if reference_loading <= 0:
+         print(f"Error: Reference loading is zero or negative ({reference_loading}). Cannot calculate scale factor.")
+         return None
+         
+    # Calculate scale factor and adjust polar points
+    try:
+        scale_factor = sqrt(actual_loading / reference_loading)
+        print(f"Wing Loading Scale Factor: {scale_factor:.4f}")
+    except ValueError:
+         print(f"Error: Cannot calculate scale factor (sqrt of negative number?) - Loading issue.")
+         return None
+         
+    adj_speeds_kmh = [s * scale_factor for s in polar['polar_speeds']]
+    adj_sinks_ms = [s * scale_factor for s in polar['polar_sinks']]
+    print(f"Original Speeds (km/h): {polar['polar_speeds']}")
+    print(f"Adjusted Speeds (km/h): {[round(s, 2) for s in adj_speeds_kmh]}")
+    print(f"Original Sinks (m/s): {polar['polar_sinks']}")
+    print(f"Adjusted Sinks (m/s): {[round(s, 3) for s in adj_sinks_ms]}")
+
+    # Convert adjusted speeds to m/s for fitting
+    adj_speeds_mps = [s * KMH_TO_MPS for s in adj_speeds_kmh]
+
+    # Fit a quadratic polynomial to the *adjusted* polar data
+    try:
+        # Ensure sinks are negative for fitting convention if needed, though polyfit handles it
+        # adj_sinks_ms_fit = [-abs(s) for s in adj_sinks_ms] # Ensure sinks are negative if polyfit expects that convention
+        coeffs = np.polyfit(adj_speeds_mps, adj_sinks_ms, 2)
+        print(f"Fitted Quadratic Coefficients (a, b, c) on adjusted data: {coeffs}")
+    except Exception as e:
+        print(f"Error fitting quadratic to adjusted polar data: {e}")
+        return None
+    # The fitted quadratic is: sink = a*v² + b*v + c, where v is in m/s.
+    a_adj, b_adj, c_adj = coeffs[0], coeffs[1], coeffs[2]
+
+    # Define candidate speed range based on *adjusted* speeds
+    if not adj_speeds_kmh:
+        print("Error: Adjusted speeds list is empty.")
+        return None
+    min_adj_speed_kmh = min(adj_speeds_kmh)
+    max_adj_speed_kmh = max(adj_speeds_kmh)
+    # Add a small buffer to the range, e.g., 10% beyond the adjusted points
+    range_buffer_factor = 0.30
+    search_min_speed_kmh = min_adj_speed_kmh * (1 - range_buffer_factor)
+    search_max_speed_kmh = max_adj_speed_kmh * (1 + range_buffer_factor)
+    speed_step_kmh = 0.5
+    print(f"Candidate Speed Range (km/h): {search_min_speed_kmh:.1f} to {search_max_speed_kmh:.1f}")
+
+
+    MC_table = []
+    # Loop over MC values (in knots) as provided
+    for mc in np.arange(mc_range[0], mc_range[1] + mc_step, mc_step):
+        # Convert MC from knots to m/s.
+        mc_mps = mc / MPS_TO_KTS
+
+        best_ratio = -float('inf')
+        best_speed_kmh = None
+        best_speed_mps = None
+        best_sink_mps = None
+
+        # Search over candidate speeds (in km/h, within the adjusted range)
+        candidate_speeds = np.arange(search_min_speed_kmh, search_max_speed_kmh + speed_step_kmh, speed_step_kmh)
+        
+        if len(candidate_speeds) == 0:
+             print(f"Warning: No candidate speeds generated for MC={mc:.2f}. Check range.")
+             continue
+
+        for speed_kmh in candidate_speeds:
+            speed_mps = speed_kmh * KMH_TO_MPS
+            # Compute sink from the *adjusted* quadratic coefficients.
+            sink_mps = a_adj * speed_mps**2 + b_adj * speed_mps + c_adj
+
+            # Only consider speeds where sink is negative (i.e. descending).
+            if sink_mps >= 0:
+                continue
+
+            # Compute performance ratio: V / (|Sink| + MC)
+            # Ensure denominator is not zero (or very small)
+            denominator = abs(sink_mps) + mc_mps
+            if denominator < 1e-6: # Avoid division by zero or near-zero
+                continue
+                
+            ratio = speed_mps / denominator
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_speed_kmh = speed_kmh
+                best_speed_mps = speed_mps
+                best_sink_mps = sink_mps
+
+        if best_speed_kmh is None:
+            # Fallback if no suitable speed found (e.g., low MC, only positive sinks calculated)
+            # Use speed for minimum sink based on adjusted coefficients
+            # Min sink occurs at v = -b / (2*a)
+            if abs(a_adj) > 1e-9:
+                 best_speed_mps_fallback = -b_adj / (2 * a_adj)
+                 # Ensure fallback speed is within reasonable bounds of the adjusted polar speeds
+                 best_speed_mps_fallback = max(min(adj_speeds_mps), min(max(adj_speeds_mps), best_speed_mps_fallback))
+                 best_speed_kmh = best_speed_mps_fallback * MPS_TO_KMH
+                 best_speed_mps = best_speed_mps_fallback
+                 best_sink_mps = a_adj * best_speed_mps**2 + b_adj * best_speed_mps + c_adj
+                 print(f"Warning: No optimal speed found for MC={mc:.2f}. Using fallback speed for min sink: {best_speed_kmh:.1f} km/h")
+            else:
+                 # If a_adj is near zero (linear fit?), fallback might be less meaningful.
+                 # Use the lowest adjusted speed as a simple fallback.
+                 best_speed_mps = min(adj_speeds_mps)
+                 best_speed_kmh = best_speed_mps * MPS_TO_KMH
+                 best_sink_mps = a_adj * best_speed_mps**2 + b_adj * best_speed_mps + c_adj
+                 print(f"Warning: No optimal speed found for MC={mc:.2f} and a_adj near zero. Using lowest adjusted speed: {best_speed_kmh:.1f} km/h")
+
+
+            # If sink is still non-negative, something is wrong, but prevent division by zero later
+            if best_sink_mps >= 0:
+                best_sink_mps = -0.01 # Assign a very small negative sink
+
+        # L/D ratio computed using m/s values at the optimal point
+        ld = abs(best_speed_mps / best_sink_mps) if abs(best_sink_mps) > 0.001 else 0
+
+        # Convert optimum speed (already adjusted) to knots and sink (already adjusted) to knots.
+        speed_kts = best_speed_kmh * KMH_TO_KTS
+        sink_kts = best_sink_mps * MPS_TO_KTS
+
+        MC_table.append([mc, speed_kts, ld, sink_kts])
+
+    # Debug output: print the table in a formatted style.
+    print("-" * 50)
+    print(f"Generated MC Table for {glider_class} (Adjusted for WL={actual_loading:.2f} kg/m²)")
+    header = "{:>6} | {:>10} | {:>8} | {:>10}".format("MC_kts", "Speed_kts", "L/D", "Sink_kts")
+    print(header)
+    print("-" * len(header))
+    for row in MC_table[:5]: # Print first 5 rows
+        print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    if len(MC_table) > 10:
+        print("  ...")
+        for row in MC_table[-5:]: # Print last 5 rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    elif len(MC_table) > 5:
+         for row in MC_table[5:]: # Print remaining rows if between 6 and 10 total
+             print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    print("-" * 50)
+
+
+    return MC_table
+
+
+def calculate_MC_equivalent(flight_data, igc_data):
+    """
+    Calculates the equivalent MC setting's L/D and Sink Rate for the flown IAS.
+    Uses the polar adjusted for wing loading based on igc_data.
+    """
+    glider_class = None
+    # Find glider class in igc file
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_class = line[index + 1:].strip()
+                print(f"Found glider class: {glider_class}")
+                #break # Found it, no need to continue loop
+            except ValueError:
+                print(f"Warning: Malformed LCONFPLName line: {line.strip()}")
+
+    if not glider_class:
+        print("Error: Glider class not found in IGC data (LCONFPLName=). Cannot calculate MC equivalents.")
+        return flight_data # Return unmodified data if no glider class found
+
+    # Generate the MC table adjusted for wing loading
+    MC_table = generate_MC_table_from_plr(glider_class, igc_data)
+    if MC_table is None:
+        print(f"Error: Failed to generate MC table for {glider_class}. Cannot calculate MC equivalents.")
+        return flight_data # Return unmodified data if table generation failed
+
+    # Use MC_table to lookup values for each flight data point
+    for i in range(1, len(flight_data)): # Start from 1 to skip header
+        try:
+            # Assuming IAS_kt is at index 17 in each sublist of flight_data
+            # Ensure the value exists and is convertible to float
+            if len(flight_data[i]) > 17 and flight_data[i][17]:
+                 ias_kt = float(flight_data[i][17])
+            else:
+                 # Handle cases where IAS_kt might be missing or empty
+                 print(f"Warning: Missing or invalid IAS_kt at row {i}. Skipping MC equivalent calculation.")
+                 flight_data[i][18] = "" # MC LD
+                 flight_data[i][19] = "" # MC Sink
+                 continue
+
+
+            # Initialize variables to keep track of the closest match in the MC table's speeds
+            closest_diff = float('inf')
+            closest_row = None
+
+            # Iterate through the generated MC_table to find the row with the closest speed
+            for row in MC_table:
+                # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+                current_diff = abs(ias_kt - row[1]) # Compare with Speed_kts (index 1)
+                if current_diff < closest_diff:
+                    closest_diff = current_diff
+                    closest_row = row
+
+            # Update flight_data with the L/D and Sink Rate from the best matching row
+            if closest_row:
+                flight_data[i][18] = str(round(closest_row[2], 1)) # MC_LD_at_IAS_kt (L/D is index 2)
+                flight_data[i][19] = str(round(closest_row[3], 3)) # MC_sinkrate_at_IAS_kt (Sink is index 3)
+            else:
+                # Should not happen if MC_table is valid, but handle defensively
+                 print(f"Warning: No closest row found in MC table for IAS {ias_kt:.1f} kts at row {i}.")
+                 flight_data[i][18] = ""
+                 flight_data[i][19] = ""
+
+        except (ValueError, IndexError, TypeError) as e:
+             # Catch potential errors during conversion or access
+             print(f"Error processing row {i} for MC equivalent: {e}. Data: {flight_data[i]}")
+             # Assign empty strings to indicate failure for this row
+             if len(flight_data[i]) > 19:
+                  flight_data[i][18] = ""
+                  flight_data[i][19] = ""
+             continue # Move to the next row
+
+    return flight_data
+
+def ideal_MC_given_avg_ias_kts(igc_data, airspeed_kts, climbrate_kts):
+    """
+    Given average IAS and climb rate, finds the ideal MC setting, corresponding speed, and L/D.
+    Uses the polar adjusted for wing loading based on igc_data.
+    """
+    glider_class = None
+    # Find glider class in igc file
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_class = line[index + 1:].strip()
+                print(f"Found glider class for ideal MC lookup: {glider_class}")
+                #break
+            except ValueError:
+                 print(f"Warning: Malformed LCONFPLName line: {line.strip()}")
+
+
+    if not glider_class:
+        print("Error: Glider class not found in IGC data (LCONFPLName=). Cannot calculate ideal MC.")
+        return None, None, None
+
+    # Generate the MC table adjusted for wing loading
+    MC_table = generate_MC_table_from_plr(glider_class, igc_data)
+    if MC_table is None:
+        print(f"Error: Failed to generate MC table for {glider_class}. Cannot calculate ideal MC.")
+        return None, None, None
+
+    try:
+        # Convert input values to float for comparison
+        airspeed_kts = float(airspeed_kts)
+        climbrate_kts = float(climbrate_kts)
+
+        # --- Find the MC table row where Speed_kts is closest to the input airspeed_kts ---
+        closest_diff_airspeed = float('inf')
+        closest_row_airspeed = None
+        for row in MC_table:
+            # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+            current_diff = abs(airspeed_kts - row[1]) # Compare with Speed_kts (index 1)
+            if current_diff < closest_diff_airspeed:
+                closest_diff_airspeed = current_diff
+                closest_row_airspeed = row
+        
+        # The MC setting corresponding to the flown airspeed
+        ideal_mc_setting_for_ias = closest_row_airspeed[0] if closest_row_airspeed else None # MC is index 0
+
+        # --- Find the MC table row where MC_kts is closest to the input climbrate_kts ---
+        # Note: We are matching climb rate (positive) to MC setting (also effectively positive lift/energy gain rate)
+        closest_diff_climbrate = float('inf')
+        closest_row_climbrate = None
+        for row in MC_table:
+             # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+             current_diff = abs(climbrate_kts - row[0]) # Compare climbrate with MC_kts (index 0)
+             if current_diff < closest_diff_climbrate:
+                 closest_diff_climbrate = current_diff
+                 closest_row_climbrate = row
+
+        # The speed corresponding to the achieved climb rate (treated as an MC setting)
+        ideal_speed_for_climb = closest_row_climbrate[1] if closest_row_climbrate else None # Speed is index 1
+        
+        # --- Get the L/D for the flown airspeed ---
+        ld_at_flown_ias = closest_row_airspeed[2] if closest_row_airspeed else None # L/D is index 2
+
+
+        if ideal_mc_setting_for_ias is not None and ideal_speed_for_climb is not None and ld_at_flown_ias is not None:
+             print(f"Ideal MC for IAS {airspeed_kts:.1f} kts: {ideal_mc_setting_for_ias:.2f} kts")
+             print(f"Ideal Speed for Climb {climbrate_kts:.2f} kts: {ideal_speed_for_climb:.1f} kts")
+             print(f"L/D at flown IAS {airspeed_kts:.1f} kts: {ld_at_flown_ias:.1f}")
+             return (float(ideal_mc_setting_for_ias), # Ideal MC setting for the speed flown
+                     float(ideal_speed_for_climb),    # Ideal speed to fly for the climb achieved
+                     float(ld_at_flown_ias))          # L/D achieved at the speed flown
+        else:
+             print("Warning: Could not find complete ideal MC/Speed/LD information.")
+             return None, None, None
+
+    except Exception as e:
+        print(f"Error in ideal_MC_given_avg_ias_kts: {e}")
+        return None, None, None
