@@ -1927,7 +1927,7 @@ def generate_MC_table_from_plr(glider_class, igc_data, mc_range=(0, 12), mc_step
     if wing_area <= 0:
         print(f"Error: Wing area is zero or negative ({wing_area}). Cannot calculate loading.")
         return None
-
+        
     reference_loading = reference_mass / wing_area
     actual_loading = actual_mass / wing_area
     # Print loading info (optional, can be commented out for cleaner output)
@@ -2404,11 +2404,11 @@ def ideal_MC_given_avg_ias_kts(igc_data, airspeed_kts, climbrate_kts):
 
 
         if ideal_mc_setting_for_ias is not None and ideal_speed_for_climb is not None and ld_at_flown_ias is not None:
-             print(f"Ideal MC for IAS {airspeed_kts:.1f} kts: {ideal_mc_setting_for_ias:.2f} kts")
-             print(f"Ideal Speed for Climb {climbrate_kts:.2f} kts: {ideal_speed_for_climb:.1f} kts")
+             print(f"Ideal MC for IAS {airspeed_kts:.1f} kts: {round(float(ideal_mc_setting_for_ias),2)} kts")
+             print(f"Ideal Speed for Climb {climbrate_kts:.2f} kts: {round(float(ideal_speed_for_climb),0)} kts")
              print(f"L/D at flown IAS {airspeed_kts:.1f} kts: {ld_at_flown_ias:.1f}")
-             return (float(ideal_mc_setting_for_ias), # Ideal MC setting for the speed flown
-                     float(ideal_speed_for_climb),    # Ideal speed to fly for the climb achieved
+             return (round(float(ideal_mc_setting_for_ias),2), # Ideal MC setting for the speed flown
+                     round(float(ideal_speed_for_climb),0),    # Ideal speed to fly for the climb achieved
                      float(ld_at_flown_ias))          # L/D achieved at the speed flown
         else:
              print("Warning: Could not find complete ideal MC/Speed/LD information.")
