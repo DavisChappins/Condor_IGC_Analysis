@@ -495,18 +495,22 @@ def analyze_heading_changes_old(flight_data):
     return flight_data
 
 
-def trim_records_by_task(flight_data):
+def trim_records_by_task(flight_data, fpl_file=None):
     """
     Trims the flight data records between 'TaskStart' and 'TaskFinish' markers.
+    If 'TaskFinish' marker is not found, falls back to using the last B-record
+    or detecting the actual finish point using task geometry if FPL file is provided.
 
     Parameters:
     - flight_data (list): A list of lists where each inner list represents a row of flight data.
+    - fpl_file (str, optional): Path to the FPL file containing task information.
 
     Returns:
     - list: Trimmed flight data including only records between 'TaskStart' and 'TaskFinish'.
     """
     task_start_index = None
     task_finish_index = None
+    last_b_record_index = None
 
     # Find indices for 'TaskStart' and 'TaskFinish'
     print("Searching for 'TaskStart' and 'TaskFinish' in the flight data...")
@@ -514,6 +518,10 @@ def trim_records_by_task(flight_data):
     for i, row in enumerate(flight_data):
         # Debug: Show current row being checked
         #print(f"Checking row {i}: {row}")
+
+        # Track the last B-record found
+        if len(row) > 0 and row[0] == 'B':
+            last_b_record_index = i
 
         if row[12] == 'TaskStart':
             task_start_index = i
@@ -523,23 +531,47 @@ def trim_records_by_task(flight_data):
             task_finish_index = i
             print(f"'TaskFinish' found at index {task_finish_index}")
 
+    # If 'TaskFinish' not found, try to detect it using task geometry if FPL is provided
+    if task_finish_index is None and fpl_file is not None:
+        print("Attempting to detect finish point using task geometry...")
+        detected_index, detected_time = detect_actual_finish_point(flight_data, fpl_file)
+        
+        if detected_index is not None:
+            task_finish_index = detected_index
+            print(f"Detected finish point at index {task_finish_index} using task geometry")
+        elif last_b_record_index is not None:
+            # Fallback to last B-record if geometry-based detection fails
+            task_finish_index = last_b_record_index
+            print(f"'TaskFinish' not found. Using last B-record at index {last_b_record_index} as fallback finish point.")
+        else:
+            print("Warning: 'TaskFinish' marker not found in the flight data and no B-records detected.")
+    # Use last B-record fallback if no FPL provided
+    elif task_finish_index is None and last_b_record_index is not None:
+        task_finish_index = last_b_record_index
+        print(f"'TaskFinish' not found. Using last B-record at index {last_b_record_index} as fallback finish point.")
+
     # Check if both indices were found and trim records based on them
     if task_start_index is not None and task_finish_index is not None:
-        print(f"Trimming data from index {task_start_index} to {task_finish_index}")
-        flight_data = flight_data[task_start_index: task_finish_index + 1]
+        # Ensure finish index is not before start index (can happen if start marker is after last B record)
+        if task_finish_index < task_start_index:
+             print(f"Warning: Determined finish index {task_finish_index} is before start index {task_start_index}. No trimming performed.")
+        else:
+            print(f"Trimming data from index {task_start_index} to {task_finish_index}")
+            trimmed_flight_data = flight_data[task_start_index : task_finish_index + 1]
+            print(f"Trimmed data contains {len(trimmed_flight_data)} records.")
+            return trimmed_flight_data
     else:
+        # Handle cases where start is missing or finish could not be determined (no marker, no B-records)
         if task_start_index is None:
             print("Warning: 'TaskStart' not found in the flight data.")
-        if task_finish_index is None:
-            print("Warning: 'TaskFinish' not found in the flight data.")
-        print("No trimming performed due to missing markers.")
+        if task_finish_index is None: # This condition is met if marker wasn't found AND no B-records were found
+            print("Warning: Task finish point could not be determined.")
+        print("No trimming performed due to missing start or finish information.")
 
-    # Debug: Show the trimmed data
-    print("Trimmed flight data:")
-    for i, row in enumerate(flight_data):
-        #print(f"Row {i}: {row}")
-        break
+    # Return original data if no trimming was performed
+    print("Returning original flight data as trimming could not be performed.")
     return flight_data
+
 
 # helperFile.py
 
@@ -865,26 +897,56 @@ def calculate_finish_efficiency_score(finish_altitude_ft: float, finish_speed_gs
 
 
 def calculate_total_energy(flight_data):
-    # Constants
-    m = 600  # mass in kg
-    g = 9.8  # acceleration due to gravity in m/s^2
+    """
+    Calculates the total energy at the start and finish of a flight.
+    Handles cases where data fields might be empty or non-numeric.
 
-    # Calculate for TaskStart (first row)
-    h_start = float(flight_data[0][5])  # altitude in meters
-    #print('h_start',h_start)
-    v_kmh_start = float(flight_data[0][9])  # groundspeed in km/h
-    #print('v_kmh_start',v_kmh_start)
-    v_ms_start = v_kmh_start / 3.6  # Convert groundspeed to m/s
-    total_energy_start = int(m * g * h_start + 0.5 * m * v_ms_start ** 2)
-    #print(total_energy_start)
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
 
-    # Calculate for TaskFinish (last row)
-    h_finish = float(flight_data[-1][5])  # altitude in meters
-    v_kmh_finish = float(flight_data[-1][9])  # groundspeed in km/h
-    v_ms_finish = v_kmh_finish / 3.6  # Convert groundspeed to m/s
-    total_energy_finish = int(m * g * h_finish + 0.5 * m * v_ms_finish ** 2)
+    Returns:
+    - tuple: (total_energy_start_J, total_energy_finish_J) in Joules, or (None, None) if calculation fails
+    """
+    try:
+        # Constants
+        m = 600  # mass in kg
+        g = 9.8  # acceleration due to gravity in m/s^2
 
-    return total_energy_start, total_energy_finish
+        # Calculate for TaskStart (first row)
+        try:
+            h_start = float(flight_data[0][5])  # altitude in meters
+            v_kmh_start = float(flight_data[0][9])  # groundspeed in km/h
+            v_ms_start = v_kmh_start / 3.6  # Convert groundspeed to m/s
+            total_energy_start = int(m * g * h_start + 0.5 * m * v_ms_start ** 2)
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"Warning: Could not parse start data for energy calculation: {flight_data[0]}")
+            total_energy_start = None
+
+        # Calculate for TaskFinish (last row)
+        try:
+            # Find the last B-record (GPS fix) for energy calculation
+            last_b_index = None
+            for i in range(len(flight_data) - 1, -1, -1):
+                if len(flight_data[i]) > 0 and flight_data[i][0] == 'B':
+                    last_b_index = i
+                    break
+            
+            if last_b_index is None:
+                raise ValueError("No B-records found for finish energy calculation")
+                
+            h_finish = float(flight_data[last_b_index][5])  # altitude in meters
+            v_kmh_finish = float(flight_data[last_b_index][9])  # groundspeed in km/h
+            v_ms_finish = v_kmh_finish / 3.6  # Convert groundspeed to m/s
+            total_energy_finish = int(m * g * h_finish + 0.5 * m * v_ms_finish ** 2)
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"Warning: Could not parse finish data for energy calculation: {flight_data[-1]}")
+            total_energy_finish = None
+
+        return total_energy_start, total_energy_finish
+    except Exception as e:
+        print(f"Error in energy calculation: {str(e)}")
+        return None, None
+
 
 def calculate_start_parameters(flight_data):
     v_start_kmh = flight_data[0][9]
@@ -892,12 +954,40 @@ def calculate_start_parameters(flight_data):
 
     return v_start_kmh, alt_start_m
 
-def calculate_finish_parameters(flight_data):   
-    v_finish_kmh = flight_data[-1][9]
-    alt_finish_m = int(flight_data[-1][5])
+def calculate_finish_parameters(flight_data):
+    """
+    Calculates the finish speed and altitude from flight data.
     
-    return v_finish_kmh, alt_finish_m
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
     
+    Returns:
+    - tuple: (finish_speed_kmh, finish_altitude_m) or (None, None) if calculation fails
+    """   
+    if not flight_data:
+        print("Warning: No flight data available for finish parameter calculation")
+        return None, None
+
+    try:
+        # Find the last proper B-record for finish parameter calculation
+        last_b_index = None
+        for i in range(len(flight_data) - 1, -1, -1):
+            if len(flight_data[i]) > 9 and flight_data[i][0] == 'B' and flight_data[i][9]:
+                last_b_index = i
+                break
+                
+        if last_b_index is None:
+            print("Warning: No valid B-records found for finish parameter calculation")
+            return None, None
+            
+        v_finish_kmh = float(flight_data[last_b_index][9])  # Convert to float
+        alt_finish_m = int(float(flight_data[last_b_index][5]))  # Convert to float first then int
+        
+        return v_finish_kmh, alt_finish_m
+    except (ValueError, IndexError, TypeError) as e:
+        print(f"Warning: Could not parse finish parameters from data: {flight_data[-1]}")
+        return None, None
+
 def extract_specific_labels(flight_data):
     glide_data = {}
     thermal_data = {}
@@ -950,26 +1040,57 @@ def calculate_sink_rate(flight_data):
         flight_data[i][15] = str(sink_rate_kts)
 
 def calculate_glide_ratio(flight_data):
+    """
+    Calculates the glide ratio (L/D) for each record in the flight data.
+    Handles cases where data fields might be empty or non-numeric.
+    
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
+    
+    Returns:
+    - The modified flight_data with glide ratios added.
+    """
     # Start from index 1 to avoid index out of range error
     for i in range(1, len(flight_data)):
-        # Calculate the change in distance in meters
-        change_in_distance = float(flight_data[i][8])
-        
-        # Calculate the change in height in meters
-        change_in_height = float(flight_data[i][5]) - float(flight_data[i - 1][5])
-        
-        # Calculate glide ratio (LD)
-        if change_in_height != 0:  # Avoid division by zero
-            glide_ratio = change_in_distance / change_in_height
-        else:
-            glide_ratio = float(-10000)  # Set to a high number if change in height is zero
-        
-        glide_ratio = glide_ratio * -1 # positive glide ratio is down
-        glide_ratio = round(glide_ratio,2)
+        try:
+            # Check if we have valid data for this record
+            if len(flight_data[i]) <= 16 or len(flight_data[i-1]) <= 5:
+                flight_data[i].extend([''] * (17 - len(flight_data[i])))
+                flight_data[i][16] = ''
+                continue
+                
+            # Skip records that don't have distance or altitude data
+            if not flight_data[i][8] or not flight_data[i][5] or not flight_data[i-1][5]:
+                flight_data[i][16] = ''
+                continue
+                
+            # Calculate the change in distance in meters
+            change_in_distance = float(flight_data[i][8])
             
-        # Store the glide ratio in flight_data[i][16]
-        flight_data[i][16] = str(glide_ratio)
-
+            # Calculate the change in height in meters
+            change_in_height = float(flight_data[i][5]) - float(flight_data[i - 1][5])
+            
+            # Calculate glide ratio (LD)
+            if change_in_height != 0:  # Avoid division by zero
+                glide_ratio = change_in_distance / change_in_height
+            else:
+                glide_ratio = float(-10000)  # Set to a high number if change in height is zero
+            
+            glide_ratio = glide_ratio * -1  # positive glide ratio is down
+            glide_ratio = round(glide_ratio, 2)
+                
+            # Store the glide ratio in flight_data[i][16]
+            flight_data[i][16] = str(glide_ratio)
+            
+        except (ValueError, IndexError, TypeError) as e:
+            # If any error occurs during calculation, set the glide ratio to empty string
+            if len(flight_data[i]) <= 16:
+                flight_data[i].extend([''] * (17 - len(flight_data[i])))
+            flight_data[i][16] = ''
+            # Uncomment for debugging
+            # print(f"Error at record {i}: {e} - Skipping glide ratio calculation for this record")
+    
+    return flight_data
 
 def calculate_ias_kt(flight_data):
     # Start from index 1 to avoid index out of range error
@@ -1131,10 +1252,10 @@ def calculate_energy(flight_data):
         speed_kmh = float(flight_data[i][13])
         speed_ms = speed_kmh * (1000 / 3600)  # Conversion from km/h to m/s
 
-        # Kinetic energy calculation: KE = 0.5 * m * v^2
+        # Kinetic energy calculation: KE = 0.5 * mass * v^2
         kinetic_energy = 0.5 * mass * speed_ms ** 2
 
-        # Potential energy calculation: PE = m * g * h
+        # Potential energy calculation: PE = mass * g * height, with g = 9.81 m/s^2
         altitude = float(flight_data[i][5])
         gravitational_acceleration = 9.81  # m/s^2, standard gravitational acceleration on Earth
         potential_energy = mass * gravitational_acceleration * altitude
@@ -2437,3 +2558,370 @@ def get_glider_type(igc_data):
             except (ValueError, IndexError):
                 pass
     return glider_type
+
+def parse_igc_coordinates(lat_str, lon_str):
+    """
+    Parse IGC format coordinates to decimal degrees.
+    
+    Args:
+        lat_str: IGC latitude string (e.g., "3317048N")
+        lon_str: IGC longitude string (e.g., "11640080W")
+        
+    Returns:
+        tuple: (latitude, longitude) in decimal degrees
+    """
+    try:
+        # Extract degrees, minutes, decimal minutes and direction
+        lat_deg = int(lat_str[:2])
+        lat_min = float(lat_str[2:7]) / 1000  # Convert to minutes.decimal_minutes
+        lat_dir = lat_str[7]
+        
+        lon_deg = int(lon_str[:3])
+        lon_min = float(lon_str[3:8]) / 1000  # Convert to minutes.decimal_minutes
+        lon_dir = lon_str[8]
+        
+        # Convert to decimal degrees
+        lat = lat_deg + (lat_min / 60.0)
+        lon = lon_deg + (lon_min / 60.0)
+        
+        # Apply direction (S and W are negative)
+        if lat_dir == 'S':
+            lat = -lat
+        if lon_dir == 'W':
+            lon = -lon
+            
+        return lat, lon
+    except (ValueError, IndexError, TypeError) as e:
+        print(f"Error parsing IGC coordinates: {e}")
+        return None, None
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great-circle distance between two points in kilometers
+    using the haversine formula.
+    
+    Args:
+        lat1, lon1: Coordinates of first point in decimal degrees
+        lat2, lon2: Coordinates of second point in decimal degrees
+        
+    Returns:
+        float: Distance in kilometers
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    r = 6371  # Radius of Earth in kilometers
+    
+    return c * r
+
+def bearing(lat1, lon1, lat2, lon2):
+    """
+    Calculate the bearing from point 1 to point 2 in degrees.
+    
+    Args:
+        lat1, lon1: Coordinates of first point in decimal degrees
+        lat2, lon2: Coordinates of second point in decimal degrees
+        
+    Returns:
+        float: Bearing in degrees (0-360)
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Calculate bearing
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - (sin(lat1) * cos(lat2) * cos(dlon))
+
+    bearing = math.atan2(y, x)
+    
+    # Convert to degrees and normalize to 0-360
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+    
+    return bearing
+
+def crossed_line(prev_lat, prev_lon, curr_lat, curr_lon, line_point_lat, line_point_lon, line_bearing, line_half_width):
+    """
+    Check if a path from prev_point to curr_point crosses a finish line.
+    
+    Args:
+        prev_lat, prev_lon: Previous position
+        curr_lat, curr_lon: Current position
+        line_point_lat, line_point_lon: Center point of the finish line
+        line_bearing: Bearing of the line in degrees (perpendicular to the direction of approach)
+        line_half_width: Half the width of the finish line in kilometers
+        
+    Returns:
+        bool: True if the path crosses the finish line
+    """
+    # Calculate distance from line center point to both positions
+    dist_prev = haversine_distance(prev_lat, prev_lon, line_point_lat, line_point_lon)
+    dist_curr = haversine_distance(curr_lat, curr_lon, line_point_lat, line_point_lon)
+    
+    # Get bearings to both positions from the line center
+    bearing_to_prev = bearing(line_point_lat, line_point_lon, prev_lat, prev_lon)
+    bearing_to_curr = bearing(line_point_lat, line_point_lon, curr_lat, curr_lon)
+    
+    # Calculate the angle differences between these bearings and the line bearing
+    # Normalize to -180 to +180 degrees
+    angle_diff_prev = ((bearing_to_prev - line_bearing + 180) % 360) - 180
+    angle_diff_curr = ((bearing_to_curr - line_bearing + 180) % 360) - 180
+    
+    # The line divides the plane into two half-planes
+    # If points are on opposite sides of the line, they have opposite signs of angle difference
+    on_opposite_sides = (angle_diff_prev * angle_diff_curr) <= 0
+    
+    # Also check if both points are within range of the finish line
+    within_range_prev = dist_prev <= line_half_width
+    within_range_curr = dist_curr <= line_half_width
+    
+    # Check distance to line (not just the center point)
+    dist_prev_to_line = abs(dist_prev * math.sin(math.radians(abs(angle_diff_prev))))
+    dist_curr_to_line = abs(dist_curr * math.sin(math.radians(abs(angle_diff_curr))))
+    
+    # The path crosses the line if:
+    # 1. The points are on opposite sides of the line, AND
+    # 2. Both points are within range of the finish line width
+    return on_opposite_sides and (within_range_prev or within_range_curr)
+
+def detect_actual_finish_point(flight_data, fpl_file):
+    """
+    Detects the actual finish point in flight data based on task geometry from FPL.
+    
+    Args:
+        flight_data: List of flight records
+        fpl_file: Path to the FPL file containing task information
+        
+    Returns:
+        tuple: (finish_index, finish_time) where finish_index is the index in flight_data
+    """
+    # Check if fpl_file exists
+    if not fpl_file or not os.path.exists(fpl_file):
+        print(f"FPL file not found: {fpl_file}")
+        return None, None
+    
+    try:
+        # Parse turnpoints from FPL file
+        with open(fpl_file, 'r') as f:
+            fpl_lines = f.readlines()
+            
+        # Parse turnpoints from FPL using the same logic as in generateSummary.py
+        turnpoints = []
+        tp_count = 0
+        
+        # First get number of turnpoints
+        for line in fpl_lines:
+            if line.startswith("Count="):
+                try:
+                    tp_count = int(line.split("=")[1].strip())
+                    break
+                except ValueError:
+                    print("Error parsing turnpoint count from FPL")
+                    return None, None
+                    
+        if tp_count < 2:  # Need at least start and finish points
+            print("Not enough turnpoints in FPL")
+            return None, None
+        
+        # Then parse each turnpoint
+        current_tp = {}
+        for line in fpl_lines:
+            for i in range(tp_count):
+                if line.startswith(f"TPName{i}="):
+                    current_tp = {'index': i, 'name': line.split("=")[1].strip()}
+                elif line.startswith(f"TPPosX{i}="):
+                    try:
+                        current_tp['x'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPPosY{i}="):
+                    try:
+                        current_tp['y'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPRadius{i}="):
+                    try:
+                        current_tp['radius'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPAngle{i}="):
+                    try:
+                        current_tp['angle'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPWidth{i}="):
+                    try:
+                        current_tp['width'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                    
+                # Check if we have all the required fields
+                if 'index' in current_tp and 'x' in current_tp and 'y' in current_tp and 'radius' in current_tp and 'angle' in current_tp:
+                    turnpoints.append(current_tp.copy())
+                    current_tp = {}  # Reset for the next turnpoint
+        
+        # Sort turnpoints by index
+        turnpoints.sort(key=lambda tp: tp['index'])
+        
+        if not turnpoints:
+            print("No turnpoints found in FPL")
+            return None, None
+        
+        print(f"Successfully parsed {len(turnpoints)} turnpoints from FPL file")
+            
+        # Finish point is the last turnpoint
+        finish_tp = turnpoints[-1]
+        
+        # Get the second to last turnpoint for approach direction
+        approach_tp = turnpoints[-2] if len(turnpoints) > 1 else None
+        
+        # Determine if finish is a cylinder or a line
+        is_cylinder = abs(finish_tp.get('angle', 0) - 360) < 1
+        
+        print(f"Finish point is {'a cylinder' if is_cylinder else 'a line'} with " + 
+              f"radius={finish_tp.get('radius', 0)/1000:.2f}km, " + 
+              f"angle={finish_tp.get('angle', 0):.1f}°")
+        
+        # For safety, only look at records after 60% of the flight 
+        # This avoids false detection when passing the finish area earlier in the flight
+        search_start_idx = int(len(flight_data) * 0.6)
+        
+        # Store IGC records with valid coordinates for analysis
+        valid_records = []
+        for i in range(search_start_idx, len(flight_data)):
+            record = flight_data[i]
+            if len(record) > 3 and record[0] == 'B':
+                try:
+                    # Check if we have valid coordinate fields
+                    if len(record[2]) >= 8 and len(record[3]) >= 9:
+                        lat, lon = parse_igc_coordinates(record[2], record[3])
+                        if lat is not None and lon is not None:
+                            valid_records.append((i, lat, lon, record[1]))  # (index, lat, lon, time)
+                except Exception as e:
+                    continue
+        
+        if len(valid_records) < 2:
+            print("Not enough valid GPS records found")
+            return None, None
+        
+        print(f"Searching through {len(valid_records)} valid GPS records for finish crossing")
+        
+        # Note: Condor FPL coordinates (x,y) don't directly translate to lat/lon
+        # We need to establish a relative coordinate system based on the finish point and the approach
+        
+        # Strategy: Convert lat/lon to a local Cartesian system centered on the finish point
+        # This is a simplified approximation for this specific task
+        
+        # Calculate the center point of the finish cylinder
+        # The challenge is that we don't know the exact lat/lon of the finish point from FPL
+        # So we'll estimate it using the approach direction and the last few points
+        
+        # For cylinder finish:
+        if is_cylinder and len(valid_records) >= 2:
+            # Look backwards through the flight track
+            finish_detected = False
+            for j in range(len(valid_records) - 1, 0, -1):
+                curr_idx, curr_lat, curr_lon, curr_time = valid_records[j]
+                prev_idx, prev_lat, prev_lon, prev_time = valid_records[j-1]
+                
+                # First find the finish center lat/lon by using the last 10 points
+                # to extrapolate backwards in the direction of the last turnpoint
+                if j == len(valid_records) - 1:
+                    # Get the last few points to determine approach direction
+                    final_points = valid_records[-min(10, len(valid_records)):]
+                    first_lat, first_lon = final_points[0][1], final_points[0][2]
+                    last_lat, last_lon = final_points[-1][1], final_points[-1][2]
+                    
+                    # Calculate the bearing of the approach
+                    approach_bearing = bearing(first_lat, first_lon, last_lat, last_lon)
+                    
+                    # Estimate finish center by extending from the last point
+                    # in the opposite direction of approach
+                    inverse_bearing = (approach_bearing + 180) % 360
+                    finish_radius_km = finish_tp.get('radius', 0) / 1000  # Convert to km
+                    
+                    # Calculate a point that's approximately 80% of the way to the finish center
+                    # This is a heuristic to estimate where the finish center might be
+                    estimated_dist = finish_radius_km * 0.8
+                    finish_center_lat, finish_center_lon = destination_point(
+                        last_lat, last_lon, inverse_bearing, estimated_dist)
+                    
+                    print(f"Estimated finish center at lat={finish_center_lat:.6f}, lon={finish_center_lon:.6f}")
+                    print(f"Using finish radius of {finish_radius_km:.2f} km")
+                
+                # Calculate distance from current point to estimated finish center
+                dist_to_finish = haversine_distance(curr_lat, curr_lon, finish_center_lat, finish_center_lon)
+                
+                # Calculate distance from previous point to estimated finish center
+                prev_dist_to_finish = haversine_distance(prev_lat, prev_lon, finish_center_lat, finish_center_lon)
+                
+                # Check if we're crossing into the finish cylinder
+                if prev_dist_to_finish > finish_radius_km and dist_to_finish <= finish_radius_km:
+                    print(f"Detected finish cylinder crossing at index {curr_idx}, time {curr_time}")
+                    print(f"Distance to finish center: {dist_to_finish:.2f} km, radius: {finish_radius_km:.2f} km")
+                    return curr_idx, curr_time
+            
+            # If we didn't find a finish crossing, but we're inside the cylinder at the end
+            last_idx, last_lat, last_lon, last_time = valid_records[-1]
+            dist_to_finish = haversine_distance(last_lat, last_lon, finish_center_lat, finish_center_lon)
+            if dist_to_finish <= finish_radius_km:
+                print(f"Already inside finish cylinder at the end of flight, using index {last_idx}")
+                return last_idx, last_time
+                
+        # For line finish (less common in Condor, but supported):
+        elif not is_cylinder and approach_tp and len(valid_records) >= 2:
+            # For line finish, we need to detect when we cross the line
+            # This is a simplified version assuming the finish line is perpendicular to the approach
+            print("Line finish detection not fully implemented, falling back to last B-record")
+        
+        # Fallback - use the last valid B-record
+        last_valid_index = valid_records[-1][0]
+        
+        print(f"No finish crossing detected, using last valid B-record at index {last_valid_index} as fallback")
+        return last_valid_index, valid_records[-1][3]
+        
+    except Exception as e:
+        print(f"Error in finish point detection: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+def destination_point(lat, lon, bearing, distance):
+    """
+    Calculate the destination point given a start point, bearing and distance
+    
+    Args:
+        lat, lon: Starting coordinates in decimal degrees
+        bearing: Bearing in degrees (0 = north, 90 = east)
+        distance: Distance in kilometers
+        
+    Returns:
+        tuple: (lat, lon) of destination point
+    """
+    # Constants for Earth
+    R = 6371.0  # Earth radius in km
+    
+    # Convert from degrees to radians
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+    bearing_rad = math.radians(bearing)
+    
+    # Calculate destination point
+    lat2 = math.asin(math.sin(lat1) * math.cos(distance/R) + 
+                     math.cos(lat1) * math.sin(distance/R) * math.cos(bearing_rad))
+    
+    lon2 = lon1 + math.atan2(math.sin(bearing_rad) * math.sin(distance/R) * math.cos(lat1),
+                             math.cos(distance/R) - math.sin(lat1) * math.sin(lat2))
+    
+    # Convert back to degrees
+    lat2 = math.degrees(lat2)
+    lon2 = math.degrees(lon2)
+    
+    return lat2, lon2

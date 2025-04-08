@@ -10,7 +10,7 @@ import re
 
 
 
-def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_finish_height_ft):
+def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_finish_height_ft, fpl_file=None):
     # Read the file and store each line as an element in a list
     print("Opening ",file_name)
     with open(file_name, 'r') as file:
@@ -61,7 +61,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
         flight_data = add_calculated_ias(flight_data)
         
-        flight_data = trim_records_by_task(flight_data)
+        flight_data = trim_records_by_task(flight_data, fpl_file)
         
         
 
@@ -72,19 +72,47 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
 
         #calculate start and finish energy
         total_energy_start_J, total_energy_finish_J  = calculate_total_energy(flight_data)
-        #print('total_energy_start_J',total_energy_start_J)
-        #print('total_energy_finish_J',total_energy_finish_J)
-        total_energy_start_MJ = round(total_energy_start_J / 1000000 ,2)
-        #print('total_energy_start_MJ',total_energy_start_MJ)
-        total_energy_finish_MJ = round(total_energy_finish_J / 1000000 ,2)
-        #print('total_energy_finish_MJ',total_energy_finish_MJ)
+        
+        # Handle cases where energy calculations return None
+        if total_energy_start_J is not None:
+            total_energy_start_MJ = round(total_energy_start_J / 1000000, 2)
+        else:
+            total_energy_start_MJ = None
+            print("Warning: Could not calculate start energy in MJ")
+
+        if total_energy_finish_J is not None:
+            total_energy_finish_MJ = round(total_energy_finish_J / 1000000, 2)
+        else:
+            total_energy_finish_MJ = None
+            print("Warning: Could not calculate finish energy in MJ")
 
         start_speed_gs_kmh, start_altitude_m = calculate_start_parameters(flight_data)
         finish_speed_gs_kmh, finish_altitude_m = calculate_finish_parameters(flight_data)
-        start_speed_gs_kts = int(start_speed_gs_kmh * 0.539957)
-        start_altitude_ft = int(start_altitude_m * 3.28084)
-        finish_speed_gs_kts = int(finish_speed_gs_kmh * 0.539957)
-        finish_altitude_ft = int(finish_altitude_m * 3.28084)
+        
+        # Handle cases where start/finish parameters return None
+        if start_speed_gs_kmh is not None:
+            start_speed_gs_kts = int(start_speed_gs_kmh * 0.539957)
+        else:
+            start_speed_gs_kts = None
+            print("Warning: Could not calculate start speed in knots")
+            
+        if start_altitude_m is not None:
+            start_altitude_ft = int(start_altitude_m * 3.28084)
+        else:
+            start_altitude_ft = None
+            print("Warning: Could not calculate start altitude in feet")
+            
+        if finish_speed_gs_kmh is not None:
+            finish_speed_gs_kts = int(finish_speed_gs_kmh * 0.539957)
+        else:
+            finish_speed_gs_kts = None
+            print("Warning: Could not calculate finish speed in knots")
+            
+        if finish_altitude_m is not None:
+            finish_altitude_ft = int(finish_altitude_m * 3.28084)
+        else:
+            finish_altitude_ft = None
+            print("Warning: Could not calculate finish altitude in feet")
         
 
                 

@@ -240,7 +240,8 @@ detailed_summary_list.append(header_row)
 # Loop through each file and analyze it.
 # Pass in both tp_adjustment_km and the optional task start_height_ft (which may be None).
 for igc_file in igc_files:
-    detailed_summary = add_igc_to_summary(igc_file, tp_adjustment_km, task_start_height_ft, task_finish_height_ft)
+    # Pass the FPL file path to add_igc_to_summary for geometry-based finish detection
+    detailed_summary = add_igc_to_summary(igc_file, tp_adjustment_km, task_start_height_ft, task_finish_height_ft, fpl_file=fpl_file if fpl_files else None)
     print(f'Processed {igc_file}')
     if detailed_summary is not None:
         detailed_summary_list.append(detailed_summary)
