@@ -10,7 +10,7 @@ import re
 
 
 
-def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_finish_height_ft):
+def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_finish_height_ft, fpl_file=None):
     # Read the file and store each line as an element in a list
     print("Opening ",file_name)
     with open(file_name, 'r') as file:
@@ -21,6 +21,9 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
 
     pilot_id = get_pilot_cn_and_name(igc_data)
     print("pilot_id",pilot_id)
+
+    glider_type = get_glider_type(igc_data)
+    print("glider_type",glider_type)
 
     task_finish_status = determine_if_task_completed(igc_data)
 
@@ -58,7 +61,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
         flight_data = add_calculated_ias(flight_data)
         
-        flight_data = trim_records_by_task(flight_data)
+        flight_data = trim_records_by_task(flight_data, fpl_file)
         
         
 
@@ -69,19 +72,47 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
 
         #calculate start and finish energy
         total_energy_start_J, total_energy_finish_J  = calculate_total_energy(flight_data)
-        #print('total_energy_start_J',total_energy_start_J)
-        #print('total_energy_finish_J',total_energy_finish_J)
-        total_energy_start_MJ = round(total_energy_start_J / 1000000 ,2)
-        #print('total_energy_start_MJ',total_energy_start_MJ)
-        total_energy_finish_MJ = round(total_energy_finish_J / 1000000 ,2)
-        #print('total_energy_finish_MJ',total_energy_finish_MJ)
+        
+        # Handle cases where energy calculations return None
+        if total_energy_start_J is not None:
+            total_energy_start_MJ = round(total_energy_start_J / 1000000, 2)
+        else:
+            total_energy_start_MJ = None
+            print("Warning: Could not calculate start energy in MJ")
+
+        if total_energy_finish_J is not None:
+            total_energy_finish_MJ = round(total_energy_finish_J / 1000000, 2)
+        else:
+            total_energy_finish_MJ = None
+            print("Warning: Could not calculate finish energy in MJ")
 
         start_speed_gs_kmh, start_altitude_m = calculate_start_parameters(flight_data)
         finish_speed_gs_kmh, finish_altitude_m = calculate_finish_parameters(flight_data)
-        start_speed_gs_kts = int(start_speed_gs_kmh * 0.539957)
-        start_altitude_ft = int(start_altitude_m * 3.28084)
-        finish_speed_gs_kts = int(finish_speed_gs_kmh * 0.539957)
-        finish_altitude_ft = int(finish_altitude_m * 3.28084)
+        
+        # Handle cases where start/finish parameters return None
+        if start_speed_gs_kmh is not None:
+            start_speed_gs_kts = int(start_speed_gs_kmh * 0.539957)
+        else:
+            start_speed_gs_kts = None
+            print("Warning: Could not calculate start speed in knots")
+            
+        if start_altitude_m is not None:
+            start_altitude_ft = int(start_altitude_m * 3.28084)
+        else:
+            start_altitude_ft = None
+            print("Warning: Could not calculate start altitude in feet")
+            
+        if finish_speed_gs_kmh is not None:
+            finish_speed_gs_kts = int(finish_speed_gs_kmh * 0.539957)
+        else:
+            finish_speed_gs_kts = None
+            print("Warning: Could not calculate finish speed in knots")
+            
+        if finish_altitude_m is not None:
+            finish_altitude_ft = int(finish_altitude_m * 3.28084)
+        else:
+            finish_altitude_ft = None
+            print("Warning: Could not calculate finish altitude in feet")
         
 
                 
@@ -195,32 +226,26 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         #calcualte start and finish energy and time
         if task_start_height_ft is not None:
             #Start
-            start_height_task_diff_ft = int(task_start_height_ft - start_altitude_ft)
-            print("start_height_task_diff_ft",start_height_task_diff_ft)
-            start_speed_max_diff_gs_kts = 91.7927 - start_speed_gs_kts
-            print("start_speed_max_diff_gs_kts",start_speed_max_diff_gs_kts)
-            task_perfect_start_J = calculate_perfect_start_J(task_start_height_ft)
-            print("task_perfect_start_J",task_perfect_start_J)
-            actual_start_energy_J = calculate_actual_energy(start_altitude_ft, start_speed_gs_kts)
-            print("actual_start_energy_J",actual_start_energy_J)
-            #start_efficiency_score = round(((actual_start_energy_J / task_perfect_start_J) *100) -90 ,2)
             start_efficiency_score = calculate_start_efficiency_score(start_altitude_ft, start_speed_gs_kts, task_start_height_ft)
             print("start_efficiency_percent",start_efficiency_score)
-            height_loss_due_to_start_energy_ft = int(calculate_total_effective_height_loss(start_height_task_diff_ft, start_speed_max_diff_gs_kts))
+            height_loss_due_to_start_energy_ft = int(calculate_energy_height_difference(
+                actual_height_ft=start_altitude_ft,
+                actual_speed_kts=start_speed_gs_kts,
+                perfect_height_ft=task_start_height_ft,
+                perfect_speed_kts=IDEAL_START_SPEED_KTS
+            ))
             print("height_loss_due_to_start_ft",height_loss_due_to_start_energy_ft)
             
             #Finish
-            finish_height_task_diff_ft = int(finish_altitude_ft - task_finish_height_ft)
-            print("finish_height_task_diff_ft",finish_height_task_diff_ft)
-            finish_speed_max_diff_gs_kts = finish_speed_gs_kts - 70
-            print("finish_speed_max_diff_gs_kts",finish_speed_max_diff_gs_kts)
-            task_perfect_finish_J = calculate_perfect_finish_J(task_finish_height_ft)
-            print("task_perfect_finish_J",task_perfect_finish_J)
-            actual_finish_energy_J = calculate_actual_finish_energy_J(finish_altitude_ft, finish_speed_gs_kts)
-            print("actual_finish_energy_J",actual_finish_energy_J)
             finish_efficiency_score = calculate_finish_efficiency_score(finish_altitude_ft, finish_speed_gs_kts, task_finish_height_ft)
             print("finish_efficiency_score",finish_efficiency_score)
-            height_loss_due_to_finish_energy_ft = int(calculate_total_effective_height_loss(finish_height_task_diff_ft, finish_speed_max_diff_gs_kts))
+            height_loss_due_to_finish_energy_ft = int(calculate_energy_height_difference(
+                actual_height_ft=finish_altitude_ft,
+                actual_speed_kts=finish_speed_gs_kts,
+                perfect_height_ft=task_finish_height_ft,
+                perfect_speed_kts=IDEAL_FINISH_SPEED_KTS,
+                is_finish=True
+            ))
             print("height_loss_due_to_finish_energy_ft",height_loss_due_to_finish_energy_ft)
         else:
             print("No start height provided. Skipping start height related processing.")
@@ -266,7 +291,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
 
 
         # Define column names and data row
-        columns = ["Name",
+        columns = ["Name", "Glider Type",
                    "Rule1_glide_avg_gs_kts", "Rule1_glide_avg_ias_kts", "Rule1_glide_ratio", "Rule1_glide_ratio_better_actual_MC","Rule1_ideal_MC_ias_given_avg_climb_kts", "Rule1_glide_avg_dist_nmi",
                    "Rule1_avg_glide_netto_kt", "Rule1_%_of_glide_netto_positive", "Rule1_%_of_glide_sinkrate_positive",
                    "Rule2_avg_climb_rate_kts", "Rule2_actual_MC_given_avg_ias_kts", "Num_useful_thermals", "Num_discarded_thermals_<75s_or_<500ft","Percent_discarded_thermals",
@@ -277,7 +302,7 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
                    "task_speed_kmh", "task_distance_km","task_time_hmmss", "total_glide_time_mmss", "total_thermal_time_mmss"
                    ]
 
-        row_data = [pilot_id,
+        row_data = [pilot_id, glider_type,
                    Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts, Rule1_glide_avg_dist_nmi,
                    avg_netto_kt, percent_glide_netto_positive, percent_glide_sinkrate_positive,
                    Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, useful_thermals, discarded_thermals, thermal_discard_percent,
@@ -308,14 +333,11 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
             
 
         # WRITE COMBINED INFO
-        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', pilot_id).strip() + '.csv'
-        #csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id or 'unknown')).strip() + '.csv'
-        base_name = os.path.splitext(os.path.basename(file_name))[0]
-        csv_file_name = 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
-
+        # Create the csv file name with the pilot_id or base_name
+        csv_file_name = os.path.join('temp', 'sequenceData_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv')
 
         # new section after freq_gs_kts calculation
-        freq_gs_kts_csv_file = 'freq_gs_kts_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv'
+        freq_gs_kts_csv_file = os.path.join('temp', 'freq_gs_kts_' + re.sub(r'[<>:"/\\|?*]', '_', str(pilot_id if pilot_id is not None else base_name)).strip() + '.csv')
 
         # Write freq_gs_kts to the new CSV file
         with open(freq_gs_kts_csv_file, 'w', newline='') as csv_file:
@@ -353,10 +375,9 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
         print(f'The data has been written to {csv_file_name}.')
 
-
         order_csv_by_starting_utc(csv_file_name)
 
-        return [pilot_id,
+        return [pilot_id, glider_type,
                 Rule1_glide_avg_gs_kts, Rule1_glide_avg_ias_kts, Rule1_glide_ratio, Rule1_glide_ratio_better_actual_MC, Rule1_ideal_ias_given_avg_climb_kts,
                 Rule1_glide_avg_dist_nmi,Rule2_avg_climb_rate_kts, Rule2_ideal_MC_given_avg_ias_kts, Rule3_total_glide_distance_nmi,
                 Rule3_total_glide_more_percent, Rule4_avg_altitude_ft, start_speed_gs_kts, start_altitude_ft,
@@ -368,5 +389,3 @@ def add_igc_to_summary(file_name, tp_adjustment_km, task_start_height_ft, task_f
         
     return
         
-    
-

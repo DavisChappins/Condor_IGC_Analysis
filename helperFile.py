@@ -7,9 +7,56 @@ import csv
 import pandas as pd
 import os
 import glob
+import numpy as np
 
+# Constants for energy calculations
+IDEAL_START_SPEED_KTS = 91.7927
+IDEAL_FINISH_SPEED_KTS = 60.0
+TE_CORRECTION_FACTOR = 0.8
+GRAVITY_MPS2 = 9.81
 
+# Conversion factors
+KMH_TO_MPS = 1000 / 3600  # km/h to m/s
+MPS_TO_KTS = 1.94384      # m/s to knots
+KMH_TO_KTS = 0.539957     # km/h to knots
+MPS_TO_KMH = 3.6          # m/s to km/h
 
+def calculate_energy_height_difference(actual_height_ft: float, actual_speed_kts: float, 
+                                    perfect_height_ft: float, perfect_speed_kts: float,
+                                    is_finish: bool = False) -> float:
+    """
+    Calculate the energy height difference between actual and perfect conditions.
+    
+    Parameters:
+        actual_height_ft (float): The actual height in feet
+        actual_speed_kts (float): The actual speed in knots
+        perfect_height_ft (float): The perfect/ideal height in feet
+        perfect_speed_kts (float): The perfect/ideal speed in knots
+        is_finish (bool): If True, this is a finish calculation and the result will be inverted
+        
+    Returns:
+        float: The energy height difference in feet
+    """
+    # Convert speeds from knots to m/s (1 knot = 0.514444 m/s)
+    actual_speed_mps = actual_speed_kts * 0.514444
+    perfect_speed_mps = perfect_speed_kts * 0.514444
+    
+    # Convert heights from feet to meters (1 foot = 0.3048 meters)
+    actual_height_m = actual_height_ft * 0.3048
+    perfect_height_m = perfect_height_ft * 0.3048
+    
+    # Calculate energy height difference in meters
+    energy_height_diff = (perfect_height_m + TE_CORRECTION_FACTOR * (perfect_speed_mps**2 / (2 * GRAVITY_MPS2))) - \
+                        (actual_height_m + TE_CORRECTION_FACTOR * (actual_speed_mps**2 / (2 * GRAVITY_MPS2)))
+    
+    # Convert back to feet
+    energy_height_diff_ft = energy_height_diff * 3.28084
+    
+    # For finish calculations, invert the result
+    if is_finish:
+        energy_height_diff_ft = -energy_height_diff_ft
+        
+    return energy_height_diff_ft
 
 
 def convert_seconds_to_mmss(overall_time_s):
@@ -448,18 +495,22 @@ def analyze_heading_changes_old(flight_data):
     return flight_data
 
 
-def trim_records_by_task(flight_data):
+def trim_records_by_task(flight_data, fpl_file=None):
     """
     Trims the flight data records between 'TaskStart' and 'TaskFinish' markers.
+    If 'TaskFinish' marker is not found, falls back to using the last B-record
+    or detecting the actual finish point using task geometry if FPL file is provided.
 
     Parameters:
     - flight_data (list): A list of lists where each inner list represents a row of flight data.
+    - fpl_file (str, optional): Path to the FPL file containing task information.
 
     Returns:
     - list: Trimmed flight data including only records between 'TaskStart' and 'TaskFinish'.
     """
     task_start_index = None
     task_finish_index = None
+    last_b_record_index = None
 
     # Find indices for 'TaskStart' and 'TaskFinish'
     print("Searching for 'TaskStart' and 'TaskFinish' in the flight data...")
@@ -467,6 +518,10 @@ def trim_records_by_task(flight_data):
     for i, row in enumerate(flight_data):
         # Debug: Show current row being checked
         #print(f"Checking row {i}: {row}")
+
+        # Track the last B-record found
+        if len(row) > 0 and row[0] == 'B':
+            last_b_record_index = i
 
         if row[12] == 'TaskStart':
             task_start_index = i
@@ -476,23 +531,47 @@ def trim_records_by_task(flight_data):
             task_finish_index = i
             print(f"'TaskFinish' found at index {task_finish_index}")
 
+    # If 'TaskFinish' not found, try to detect it using task geometry if FPL is provided
+    if task_finish_index is None and fpl_file is not None:
+        print("Attempting to detect finish point using task geometry...")
+        detected_index, detected_time = detect_actual_finish_point(flight_data, fpl_file)
+        
+        if detected_index is not None:
+            task_finish_index = detected_index
+            print(f"Detected finish point at index {task_finish_index} using task geometry")
+        elif last_b_record_index is not None:
+            # Fallback to last B-record if geometry-based detection fails
+            task_finish_index = last_b_record_index
+            print(f"'TaskFinish' not found. Using last B-record at index {last_b_record_index} as fallback finish point.")
+        else:
+            print("Warning: 'TaskFinish' marker not found in the flight data and no B-records detected.")
+    # Use last B-record fallback if no FPL provided
+    elif task_finish_index is None and last_b_record_index is not None:
+        task_finish_index = last_b_record_index
+        print(f"'TaskFinish' not found. Using last B-record at index {last_b_record_index} as fallback finish point.")
+
     # Check if both indices were found and trim records based on them
     if task_start_index is not None and task_finish_index is not None:
-        print(f"Trimming data from index {task_start_index} to {task_finish_index}")
-        flight_data = flight_data[task_start_index: task_finish_index + 1]
+        # Ensure finish index is not before start index (can happen if start marker is after last B record)
+        if task_finish_index < task_start_index:
+             print(f"Warning: Determined finish index {task_finish_index} is before start index {task_start_index}. No trimming performed.")
+        else:
+            print(f"Trimming data from index {task_start_index} to {task_finish_index}")
+            trimmed_flight_data = flight_data[task_start_index : task_finish_index + 1]
+            print(f"Trimmed data contains {len(trimmed_flight_data)} records.")
+            return trimmed_flight_data
     else:
+        # Handle cases where start is missing or finish could not be determined (no marker, no B-records)
         if task_start_index is None:
             print("Warning: 'TaskStart' not found in the flight data.")
-        if task_finish_index is None:
-            print("Warning: 'TaskFinish' not found in the flight data.")
-        print("No trimming performed due to missing markers.")
+        if task_finish_index is None: # This condition is met if marker wasn't found AND no B-records were found
+            print("Warning: Task finish point could not be determined.")
+        print("No trimming performed due to missing start or finish information.")
 
-    # Debug: Show the trimmed data
-    print("Trimmed flight data:")
-    for i, row in enumerate(flight_data):
-        #print(f"Row {i}: {row}")
-        break
+    # Return original data if no trimming was performed
+    print("Returning original flight data as trimming could not be performed.")
     return flight_data
+
 
 # helperFile.py
 
@@ -818,26 +897,56 @@ def calculate_finish_efficiency_score(finish_altitude_ft: float, finish_speed_gs
 
 
 def calculate_total_energy(flight_data):
-    # Constants
-    m = 600  # mass in kg
-    g = 9.8  # acceleration due to gravity in m/s^2
+    """
+    Calculates the total energy at the start and finish of a flight.
+    Handles cases where data fields might be empty or non-numeric.
 
-    # Calculate for TaskStart (first row)
-    h_start = float(flight_data[0][5])  # altitude in meters
-    #print('h_start',h_start)
-    v_kmh_start = float(flight_data[0][9])  # groundspeed in km/h
-    #print('v_kmh_start',v_kmh_start)
-    v_ms_start = v_kmh_start / 3.6  # Convert groundspeed to m/s
-    total_energy_start = int(m * g * h_start + 0.5 * m * v_ms_start ** 2)
-    #print(total_energy_start)
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
 
-    # Calculate for TaskFinish (last row)
-    h_finish = float(flight_data[-1][5])  # altitude in meters
-    v_kmh_finish = float(flight_data[-1][9])  # groundspeed in km/h
-    v_ms_finish = v_kmh_finish / 3.6  # Convert groundspeed to m/s
-    total_energy_finish = int(m * g * h_finish + 0.5 * m * v_ms_finish ** 2)
+    Returns:
+    - tuple: (total_energy_start_J, total_energy_finish_J) in Joules, or (None, None) if calculation fails
+    """
+    try:
+        # Constants
+        m = 600  # mass in kg
+        g = 9.8  # acceleration due to gravity in m/s^2
 
-    return total_energy_start, total_energy_finish
+        # Calculate for TaskStart (first row)
+        try:
+            h_start = float(flight_data[0][5])  # altitude in meters
+            v_kmh_start = float(flight_data[0][9])  # groundspeed in km/h
+            v_ms_start = v_kmh_start / 3.6  # Convert groundspeed to m/s
+            total_energy_start = int(m * g * h_start + 0.5 * m * v_ms_start ** 2)
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"Warning: Could not parse start data for energy calculation: {flight_data[0]}")
+            total_energy_start = None
+
+        # Calculate for TaskFinish (last row)
+        try:
+            # Find the last B-record (GPS fix) for energy calculation
+            last_b_index = None
+            for i in range(len(flight_data) - 1, -1, -1):
+                if len(flight_data[i]) > 0 and flight_data[i][0] == 'B':
+                    last_b_index = i
+                    break
+            
+            if last_b_index is None:
+                raise ValueError("No B-records found for finish energy calculation")
+                
+            h_finish = float(flight_data[last_b_index][5])  # altitude in meters
+            v_kmh_finish = float(flight_data[last_b_index][9])  # groundspeed in km/h
+            v_ms_finish = v_kmh_finish / 3.6  # Convert groundspeed to m/s
+            total_energy_finish = int(m * g * h_finish + 0.5 * m * v_ms_finish ** 2)
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"Warning: Could not parse finish data for energy calculation: {flight_data[-1]}")
+            total_energy_finish = None
+
+        return total_energy_start, total_energy_finish
+    except Exception as e:
+        print(f"Error in energy calculation: {str(e)}")
+        return None, None
+
 
 def calculate_start_parameters(flight_data):
     v_start_kmh = flight_data[0][9]
@@ -845,12 +954,40 @@ def calculate_start_parameters(flight_data):
 
     return v_start_kmh, alt_start_m
 
-def calculate_finish_parameters(flight_data):   
-    v_finish_kmh = flight_data[-1][9]
-    alt_finish_m = int(flight_data[-1][5])
+def calculate_finish_parameters(flight_data):
+    """
+    Calculates the finish speed and altitude from flight data.
     
-    return v_finish_kmh, alt_finish_m
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
     
+    Returns:
+    - tuple: (finish_speed_kmh, finish_altitude_m) or (None, None) if calculation fails
+    """   
+    if not flight_data:
+        print("Warning: No flight data available for finish parameter calculation")
+        return None, None
+
+    try:
+        # Find the last proper B-record for finish parameter calculation
+        last_b_index = None
+        for i in range(len(flight_data) - 1, -1, -1):
+            if len(flight_data[i]) > 9 and flight_data[i][0] == 'B' and flight_data[i][9]:
+                last_b_index = i
+                break
+                
+        if last_b_index is None:
+            print("Warning: No valid B-records found for finish parameter calculation")
+            return None, None
+            
+        v_finish_kmh = float(flight_data[last_b_index][9])  # Convert to float
+        alt_finish_m = int(float(flight_data[last_b_index][5]))  # Convert to float first then int
+        
+        return v_finish_kmh, alt_finish_m
+    except (ValueError, IndexError, TypeError) as e:
+        print(f"Warning: Could not parse finish parameters from data: {flight_data[-1]}")
+        return None, None
+
 def extract_specific_labels(flight_data):
     glide_data = {}
     thermal_data = {}
@@ -903,26 +1040,57 @@ def calculate_sink_rate(flight_data):
         flight_data[i][15] = str(sink_rate_kts)
 
 def calculate_glide_ratio(flight_data):
+    """
+    Calculates the glide ratio (L/D) for each record in the flight data.
+    Handles cases where data fields might be empty or non-numeric.
+    
+    Parameters:
+    - flight_data (list): A list of lists where each inner list represents a row of flight data.
+    
+    Returns:
+    - The modified flight_data with glide ratios added.
+    """
     # Start from index 1 to avoid index out of range error
     for i in range(1, len(flight_data)):
-        # Calculate the change in distance in meters
-        change_in_distance = float(flight_data[i][8])
-        
-        # Calculate the change in height in meters
-        change_in_height = float(flight_data[i][5]) - float(flight_data[i - 1][5])
-        
-        # Calculate glide ratio (LD)
-        if change_in_height != 0:  # Avoid division by zero
-            glide_ratio = change_in_distance / change_in_height
-        else:
-            glide_ratio = float(-10000)  # Set to a high number if change in height is zero
-        
-        glide_ratio = glide_ratio * -1 # positive glide ratio is down
-        glide_ratio = round(glide_ratio,2)
+        try:
+            # Check if we have valid data for this record
+            if len(flight_data[i]) <= 16 or len(flight_data[i-1]) <= 5:
+                flight_data[i].extend([''] * (17 - len(flight_data[i])))
+                flight_data[i][16] = ''
+                continue
+                
+            # Skip records that don't have distance or altitude data
+            if not flight_data[i][8] or not flight_data[i][5] or not flight_data[i-1][5]:
+                flight_data[i][16] = ''
+                continue
+                
+            # Calculate the change in distance in meters
+            change_in_distance = float(flight_data[i][8])
             
-        # Store the glide ratio in flight_data[i][16]
-        flight_data[i][16] = str(glide_ratio)
-
+            # Calculate the change in height in meters
+            change_in_height = float(flight_data[i][5]) - float(flight_data[i - 1][5])
+            
+            # Calculate glide ratio (LD)
+            if change_in_height != 0:  # Avoid division by zero
+                glide_ratio = change_in_distance / change_in_height
+            else:
+                glide_ratio = float(-10000)  # Set to a high number if change in height is zero
+            
+            glide_ratio = glide_ratio * -1  # positive glide ratio is down
+            glide_ratio = round(glide_ratio, 2)
+                
+            # Store the glide ratio in flight_data[i][16]
+            flight_data[i][16] = str(glide_ratio)
+            
+        except (ValueError, IndexError, TypeError) as e:
+            # If any error occurs during calculation, set the glide ratio to empty string
+            if len(flight_data[i]) <= 16:
+                flight_data[i].extend([''] * (17 - len(flight_data[i])))
+            flight_data[i][16] = ''
+            # Uncomment for debugging
+            # print(f"Error at record {i}: {e} - Skipping glide ratio calculation for this record")
+    
+    return flight_data
 
 def calculate_ias_kt(flight_data):
     # Start from index 1 to avoid index out of range error
@@ -934,55 +1102,6 @@ def calculate_ias_kt(flight_data):
         
         flight_data[i][17] = str(ias_kt)
 
-
-def calculate_MC_equivalent(flight_data, igc_data):
-    #find glider class in igc file
-    for line in igc_data:
-        if 'LCONFPLName=' in line:
-            # Find the index of '=' and return the substring after it
-            index = line.index('=')
-            glider_class =  line[index + 1:].strip()
-        
-            # Append '.csv' onto the end of the result
-            glider_class += '.csv'
-            print(glider_class)
-            
-            #return result
-    #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
-    MC_table = []
-
-    with open(file_path, 'r') as file:
-        csv_reader = csv.reader(file)
-        for row in csv_reader:
-            MC_table.append(row)
-    #print(MC_table)
-    
-    #use MC_table to lookup
-    for i in range(1, len(flight_data)):
-        # Assuming IAS_kt is at index 17 in each sublist of flight_data
-        ias_kt = flight_data[i][17]
-
-        # Convert IAS_kt to float for comparison
-        ias_kt = float(ias_kt)
-
-        # Initialize variables to keep track of the closest match
-        closest_diff = float('inf')
-        closest_row = None
-
-        # Iterate through MC_table starting from the second row (index 1) for airspeed
-        for row in MC_table[1:]:
-            current_diff = abs(ias_kt - float(row[1]))
-            if current_diff < closest_diff:
-                closest_diff = current_diff
-                closest_row = row
-
-        # Update flight_data with the MC LD value    
-        flight_data[i][18] = closest_row[2]
-        
-        # Update flight_data with the MC sinkrate value    
-        flight_data[i][19] = closest_row[3]
-    
 def calculate_netto(flight_data):
     for i in range(2, len(flight_data)):
         # Check if flight_data[i][11] contains "Glide"
@@ -1133,10 +1252,10 @@ def calculate_energy(flight_data):
         speed_kmh = float(flight_data[i][13])
         speed_ms = speed_kmh * (1000 / 3600)  # Conversion from km/h to m/s
 
-        # Kinetic energy calculation: KE = 0.5 * m * v^2
+        # Kinetic energy calculation: KE = 0.5 * mass * v^2
         kinetic_energy = 0.5 * mass * speed_ms ** 2
 
-        # Potential energy calculation: PE = m * g * h
+        # Potential energy calculation: PE = mass * g * height, with g = 9.81 m/s^2
         altitude = float(flight_data[i][5])
         gravitational_acceleration = 9.81  # m/s^2, standard gravitational acceleration on Earth
         potential_energy = mass * gravitational_acceleration * altitude
@@ -1200,10 +1319,11 @@ def thermal_sequence(thermal_data):
             print(f"No data for {key}.")
             thermal_info[key] = None
         else:
-            # Extract altitude, time, and speed data from thermal_data[key]
+            # Extract altitude, time, speed, and heading data from thermal_data[key]
             altitudes = [row[5] for row in data]
             times = list(range(len(data)))
             speeds_kmh = [row[9] for row in data]
+            headings_deg = [row[7] for row in data]
 
             # Calculate average rate of climb
             if times[-1] != 0:
@@ -1394,8 +1514,10 @@ def glide_sequence(glide_data):
 
     def convert_lat_lon_to_decimal(lat_str, lon_str):
         lat_dir, lon_dir = lat_str[-1], lon_str[-1]
-        lat_deg, lon_deg = float(lat_str[:2]), float(lon_str[:3])
-        lat_min, lon_min = float(lat_str[2:4] + '.' + lat_str[4:-1]), float(lon_str[3:5] + '.' + lon_str[5:-1])
+        lat_deg = float(lat_str[:2])
+        lon_deg = float(lon_str[:3])
+        lat_min = float(lat_str[2:4] + '.' + lat_str[4:7])
+        lon_min = float(lon_str[3:5] + '.' + lon_str[5:8])
         lat_decimal = lat_deg + lat_min / 60
         lon_decimal = lon_deg + lon_min / 60
         lat_decimal = lat_decimal if lat_dir.upper() == 'N' else -lat_decimal
@@ -1612,60 +1734,6 @@ def MC_lookup(airspeed, MC_table):
 
     return float(closest_row[0])
 
-
-
-def ideal_MC_given_avg_ias_kts(igc_data, airspeed, climbrate):
-    #find glider class in igc file
-    for line in igc_data:
-        if 'LCONFPLName=' in line:
-            # Find the index of '=' and return the substring after it
-            index = line.index('=')
-            glider_class =  line[index + 1:].strip()
-        
-            # Append '.csv' onto the end of the result
-            glider_class += '.csv'
-            #print(glider_class)
-            
-            #return result
-    #use glider_class in csv lookup
-    file_path = glider_class #"18-meter.csv" #uses JS3 at max gross because thats the best
-    MC_table = []
-
-    with open(file_path, 'r') as file:
-        csv_reader = csv.reader(file)
-        for row in csv_reader:
-            MC_table.append(row)
-    #print(MC_table)
-    
-    # Convert to float for comparison
-    airspeed = float(airspeed)
-    climbrate = float(climbrate)
-
-    # Initialize variables to keep track of the closest match
-    closest_diff = float('inf')
-    closest_row = None
-
-    # Iterate through MC_table starting from the second row (index 1) for airspeed
-    for row in MC_table[1:]:
-        current_diff = abs(airspeed - float(row[1]))
-        if current_diff < closest_diff:
-            closest_diff = current_diff
-            closest_row_airspeed = row
-            #print('closest_row_airspeed',closest_row_airspeed)
-            
-    # Initialize variables to keep track of the closest match
-    closest_diff = float('inf')
-    closest_row = None
-    
-    # Iterate through MC_table starting from the second row (index 1) for MC setting
-    for row in MC_table[1:]:
-        current_diff = abs(climbrate - float(row[0]))
-        if current_diff < closest_diff:
-            closest_diff = current_diff
-            closest_row_climbrate = row    
-
-    return float(closest_row_airspeed[0]), float(closest_row_climbrate[1]), float(closest_row_airspeed[2])
-
 def get_pilot_cn_and_name(igc_data):
     pilot_name = None
     competition_id = None
@@ -1720,7 +1788,7 @@ def determine_if_task_completed(igc_data):
     for line in igc_data:
         if 'LCONFlightInfoPlayerStatus=' in line:
             equal_index = line.index('=')
-            finished_yes_no = line[equal_index + 1:].strip()
+            finished_yes_no = line[equal_index + 1:].strip().upper()
             if finished_yes_no == 'FINISHED':
                 finish_status = 'Task Completed'
             else:
@@ -1829,11 +1897,15 @@ def calculate_groundspeed_frequency(glide_data):
 
     return freq_gs_kts
 
-
-
 def delete_csv_files_with_prefix(prefix):
+    """
+    Delete all CSV files in the temp directory that start with the given prefix.
+    
+    Parameters:
+        prefix (str): The prefix to match against file names
+    """
     # Create a pattern to match CSV files starting with the specified prefix
-    pattern = f'{prefix}*.csv'
+    pattern = os.path.join('temp', f'{prefix}*.csv')
 
     # Use glob to find all matching files
     files_to_delete = glob.glob(pattern)
@@ -1845,3 +1917,1011 @@ def delete_csv_files_with_prefix(prefix):
             print(f"Deleted: {file_path}")
         except Exception as e:
             print(f"Error deleting {file_path}: {e}")
+
+
+
+
+# Conversion factors
+KMH_TO_MPS = 1000 / 3600  # km/h to m/s
+MPS_TO_KTS = 1.94384      # m/s to knots
+KMH_TO_KTS = 0.539957     # km/h to knots
+
+# Example usage:
+# table = generate_MC_table_from_plr("ASW20")
+def extract_ballast(igc_data):
+    """
+    Extracts water ballast and fixed ballast from IGC data lines.
+
+    Args:
+        igc_data (list): A list of strings representing lines from an IGC file.
+
+    Returns:
+        float: Total ballast in kilograms. Returns 0 if lines are not found or values are invalid.
+    """
+    water_ballast = 0.0
+    fixed_ballast = 0.0
+    found_water = False
+    found_fixed = False
+
+    for line in igc_data:
+        try:
+            if line.startswith("LCONFPLWater="):
+                water_ballast = float(line.split("=")[1].strip())
+                found_water = True
+                #print(f"Found Water Ballast: {water_ballast} kg") # Debug
+            elif line.startswith("LCONFPLfixedMass="):
+                fixed_ballast = float(line.split("=")[1].strip())
+                found_fixed = True
+                #print(f"Found Fixed Mass: {fixed_ballast} kg") # Debug
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Could not parse ballast line: {line.strip()} - {e}")
+            # Continue searching even if one line fails
+
+        if found_water and found_fixed:
+            break # Stop searching once both are found
+
+    if not found_water:
+        print("Warning: LCONFPLWater= line not found in IGC data. Assuming 0 water ballast.")
+    if not found_fixed:
+        print("Warning: LCONFPLfixedMass= line not found in IGC data. Assuming 0 fixed ballast.")
+
+    total_ballast = water_ballast + fixed_ballast
+    print(f"Total Ballast Calculated: {total_ballast:.2f} kg (Water: {water_ballast}, Fixed: {fixed_ballast})")
+    return total_ballast
+
+def parse_polar_file(content):
+    """
+    Parses a polar file (ignoring lines starting with '*') and returns a dictionary with:
+      - mass, max_water_ballast, polar_speeds (km/h), polar_sinks (m/s), wing_area.
+    """
+    lines = [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('*')]
+    if not lines:
+        print("Error: No valid data lines found in polar file content.")
+        return None
+    try:
+        values = [float(val.strip()) for val in lines[0].split(',')]
+    except Exception as e:
+        print(f"Error parsing polar values from line '{lines[0]}': {e}")
+        return None
+        
+    if len(values) >= 9:
+        polar_dict = {
+            'mass': values[0], # This is MassDryGross
+            'max_water_ballast': values[1],
+            'polar_speeds': [values[2], values[4], values[6]],  # in km/h
+            'polar_sinks': [values[3], values[5], values[7]],     # in m/s
+            'wing_area': values[8]
+        }
+        # Basic validation
+        if polar_dict['wing_area'] <= 0:
+            print(f"Error: Invalid Wing Area ({polar_dict['wing_area']}) in polar file.")
+            return None
+        if polar_dict['mass'] <= 0:
+            print(f"Error: Invalid MassDryGross ({polar_dict['mass']}) in polar file.")
+            return None
+        return polar_dict
+    else:
+        print(f"Error: Insufficient values on data line in polar file. Expected >= 9, got {len(values)}.")
+        return None
+
+
+# MODIFIED FUNCTION
+def generate_MC_table_from_plr(glider_class, igc_data, mc_range=(0, 12), mc_step=0.01):
+    """
+    Generate an MC (MacCready) table from a .plr file, adjusting for wing loading.
+
+    Reads ballast from igc_data, adjusts polar points based on actual wing loading,
+    fits a quadratic to the adjusted points, and then calculates the MC table using
+    a direct mathematical formula (tangent method).
+
+    Args:
+        glider_class (str): The name of the glider (e.g., "JS1-18").
+        igc_data (list): List of strings from the IGC file.
+        mc_range (tuple): Min and max MC values (knots) for the table.
+        mc_step (float): Step size for MC values (knots).
+
+    Returns:
+        list: A list of lists, where each inner list is [MC (kts), Speed (kts), L/D, Sink (kts)],
+              or None if an error occurs.
+    """
+    file_path = os.path.join("polars", f"{glider_class}.plr")
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        # print(f"Successfully opened polar file: {file_path}") # Keep for debug if needed
+    except Exception as e:
+        print(f"Error opening polar file {file_path}: {e}")
+        return None
+
+    polar = parse_polar_file(content)
+    if not polar:
+        print(f"Error: Could not parse polar file for {glider_class}.")
+        return None
+    # print(f"Parsed polar data for {glider_class}: {polar}") # Keep for debug if needed
+
+    # Extract ballast and calculate actual wing loading
+    ballast = extract_ballast(igc_data)
+    reference_mass = polar['mass'] # MassDryGross from polar file
+    actual_mass = reference_mass + ballast
+    wing_area = polar['wing_area']
+
+    if wing_area <= 0:
+        print(f"Error: Wing area is zero or negative ({wing_area}). Cannot calculate loading.")
+        return None
+        
+    reference_loading = reference_mass / wing_area
+    actual_loading = actual_mass / wing_area
+    # Print loading info (optional, can be commented out for cleaner output)
+    # print(f"Reference Mass: {reference_mass:.2f} kg, Ballast: {ballast:.2f} kg, Actual Mass: {actual_mass:.2f} kg")
+    # print(f"Wing Area: {wing_area:.2f} m²")
+    # print(f"Reference Loading: {reference_loading:.2f} kg/m²")
+    # print(f"Actual Loading: {actual_loading:.2f} kg/m²")
+
+    if reference_loading <= 0:
+         print(f"Error: Reference loading is zero or negative ({reference_loading}). Cannot calculate scale factor.")
+         return None
+
+    # Calculate scale factor and adjust polar points
+    try:
+        scale_factor = sqrt(actual_loading / reference_loading)
+        # print(f"Wing Loading Scale Factor: {scale_factor:.4f}") # Keep for debug if needed
+    except ValueError:
+         print(f"Error: Cannot calculate scale factor (sqrt of negative number?) - Loading issue.")
+         return None
+
+    # Adjust speeds and sinks
+    adj_speeds_kmh = [s * scale_factor for s in polar['polar_speeds']]
+    adj_sinks_ms = [s * scale_factor for s in polar['polar_sinks']]
+    # print(f"Adjusted Speeds (km/h): {[round(s, 2) for s in adj_speeds_kmh]}") # Keep for debug if needed
+    # print(f"Adjusted Sinks (m/s): {[round(s, 3) for s in adj_sinks_ms]}")    # Keep for debug if needed
+
+    # Convert adjusted speeds to m/s for fitting
+    adj_speeds_mps = [s * KMH_TO_MPS for s in adj_speeds_kmh]
+
+    # Fit a quadratic polynomial to the *adjusted* polar data
+    try:
+        coeffs = np.polyfit(adj_speeds_mps, adj_sinks_ms, 2)
+        # print(f"Fitted Quadratic Coefficients (a, b, c) on adjusted data: {coeffs}") # Keep for debug if needed
+    except Exception as e:
+        print(f"Error fitting quadratic to adjusted polar data: {e}")
+        return None
+    # The fitted quadratic is: sink = a*v² + b*v + c, where v is in m/s.
+    a_adj, b_adj, c_adj = coeffs[0], coeffs[1], coeffs[2]
+
+    # Determine speed for minimum sink (used as fallback)
+    # Min sink occurs at v = -b / (2*a)
+    if abs(a_adj) > 1e-9:
+        v_min_sink_mps = -b_adj / (2 * a_adj)
+        # Ensure min sink speed is within a reasonable range based on adjusted polar points
+        min_adj_speed_mps = min(adj_speeds_mps) if adj_speeds_mps else 0
+        max_adj_speed_mps = max(adj_speeds_mps) if adj_speeds_mps else v_min_sink_mps # Avoid error if list empty
+        v_min_sink_mps = max(min_adj_speed_mps, min(max_adj_speed_mps, v_min_sink_mps))
+    else:
+        # Handle case where 'a' is near zero (linear fit approximation)
+        print("Warning: Coefficient 'a' is near zero. Min sink calculation might be unstable.")
+        # Fallback: use the speed corresponding to the lowest point in the adjusted input data
+        if adj_speeds_mps and adj_sinks_ms:
+             min_sink_index = np.argmin(adj_sinks_ms)
+             v_min_sink_mps = adj_speeds_mps[min_sink_index]
+        else:
+             v_min_sink_mps = 0 # Further fallback if adjusted points are missing
+
+    MC_table = []
+    # Loop over MC values (in knots) as provided
+    for mc in np.arange(mc_range[0], mc_range[1] + mc_step, mc_step):
+        # Convert MC from knots to m/s.
+        mc_mps = mc / MPS_TO_KTS
+
+        v_opt_mps = None # Initialize optimal speed
+
+        # --- Direct Mathematical Calculation ---
+        if mc_mps <= 0:
+            # For MC=0 or less, the optimal speed is the speed for minimum sink
+            v_opt_mps = v_min_sink_mps
+            # print(f"MC={mc:.2f} <= 0, using V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+        else:
+            # Check if 'a' is significantly non-zero
+            if abs(a_adj) > 1e-9:
+                # Calculate the term inside the square root for the tangent formula
+                ratio_term = (c_adj - mc_mps) / a_adj
+                # print(f"MC={mc:.2f}, ratio_term = ({c_adj:.3f} - {mc_mps:.3f}) / {a_adj:.5f} = {ratio_term:.3f}") # Debug
+
+                if ratio_term >= 0:
+                     # Standard tangent formula applies
+                     v_opt_mps = sqrt(ratio_term)
+                     # print(f"  Calculated v_opt_mps = sqrt({ratio_term:.3f}) = {v_opt_mps:.2f} m/s") # Debug
+                else:
+                     # If ratio_term is negative, it means the MC value is high,
+                     # and the tangent point is beyond the vertex.
+                     # The optimal speed mathematically approaches infinity, but practically
+                     # limited. Fallback to speed for minimum sink as a reasonable guess,
+                     # although this isn't strictly the tangent point anymore.
+                     # Some sources might suggest extrapolating, but using V_min_sink is safer
+                     # given the limited input points.
+                     v_opt_mps = v_min_sink_mps
+                     # print(f"  Ratio term negative, falling back to V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+            else:
+                # If 'a' is near zero, the polar is nearly linear. The optimal speed
+                # would theoretically be very high. Fallback to V_min_sink.
+                 v_opt_mps = v_min_sink_mps
+                 # print(f"MC={mc:.2f}, a_adj near zero, falling back to V_min_sink: {v_opt_mps:.2f} m/s") # Debug
+
+        # --- Calculation finished, now calculate results ---
+
+        # Calculate sink rate at the optimal speed using the adjusted quadratic coefficients
+        sink_mps = a_adj * v_opt_mps**2 + b_adj * v_opt_mps + c_adj
+
+        # Ensure sink rate is negative for L/D calculation consistency
+        if sink_mps >= 0:
+             # This might happen due to numerical precision or if V_min_sink itself is slightly positive
+             # Force a small negative value to avoid division by zero in L/D and represent descent
+             sink_mps = -0.001
+             # print(f"  Calculated sink non-negative ({sink_mps:.3f}), forcing to -0.001 m/s") # Debug
+
+        # L/D ratio computed using m/s values at the optimal point
+        # We use abs(sink_mps) because sink is negative (down)
+        ld = abs(v_opt_mps / sink_mps) if abs(sink_mps) > 1e-6 else 0
+
+        # Convert optimal speed (m/s) to km/h and then to knots
+        speed_kmh = v_opt_mps * MPS_TO_KMH
+        speed_kts = speed_kmh * KMH_TO_KTS
+
+        # Convert optimal sink rate (m/s) to knots
+        sink_kts = sink_mps * MPS_TO_KTS
+
+        MC_table.append([mc, speed_kts, ld, sink_kts])
+        # print(f"  Added to table: MC={mc:.2f}, Spd={speed_kts:.2f}, LD={ld:.2f}, Sink={sink_kts:.2f}") # Debug
+
+    # --- [ Debug printing of the table remains the same ] ---
+    print("-" * 50)
+    print(f"Generated MC Table for {glider_class} (Adjusted for WL={actual_loading:.2f} kg/m²)")
+    header = "{:>6} | {:>10} | {:>8} | {:>10}".format("MC_kts", "Speed_kts", "L/D", "Sink_kts")
+    print(header)
+    print("-" * len(header))
+    # Determine how many rows to print at start/end
+    num_rows_display = 5
+    if len(MC_table) <= 2 * num_rows_display:
+        for row in MC_table:
+             print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    else:
+        for row in MC_table[:num_rows_display]: # Print first N rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+        print("  ...")
+        for row in MC_table[-num_rows_display:]: # Print last N rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    print("-" * 50)
+
+    return MC_table
+
+    """
+    Generate an MC (MacCready) table from a .plr file, adjusting for wing loading.
+
+    Reads ballast from igc_data, adjusts polar points based on actual wing loading,
+    fits a quadratic to the adjusted points, and then calculates the MC table.
+
+    Args:
+        glider_class (str): The name of the glider (e.g., "JS1-18").
+        igc_data (list): List of strings from the IGC file.
+        mc_range (tuple): Min and max MC values (knots) for the table.
+        mc_step (float): Step size for MC values (knots).
+
+    Returns:
+        list: A list of lists, where each inner list is [MC (kts), Speed (kts), L/D, Sink (kts)],
+              or None if an error occurs.
+    """
+    file_path = os.path.join("polars", f"{glider_class}.plr")
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        print(f"Successfully opened polar file: {file_path}")
+    except Exception as e:
+        print(f"Error opening polar file {file_path}: {e}")
+        return None
+
+    polar = parse_polar_file(content)
+    if not polar:
+        print(f"Error: Could not parse polar file for {glider_class}.")
+        return None
+    print(f"Parsed polar data for {glider_class}: {polar}")
+
+    # Extract ballast and calculate actual wing loading
+    ballast = extract_ballast(igc_data)
+    reference_mass = polar['mass'] # MassDryGross from polar file
+    actual_mass = reference_mass + ballast
+    wing_area = polar['wing_area']
+
+    if wing_area <= 0:
+        print(f"Error: Wing area is zero or negative ({wing_area}). Cannot calculate loading.")
+        return None
+        
+    reference_loading = reference_mass / wing_area
+    actual_loading = actual_mass / wing_area
+    print(f"Reference Mass: {reference_mass:.2f} kg, Ballast: {ballast:.2f} kg, Actual Mass: {actual_mass:.2f} kg")
+    print(f"Wing Area: {wing_area:.2f} m²")
+    print(f"Reference Loading: {reference_loading:.2f} kg/m²")
+    print(f"Actual Loading: {actual_loading:.2f} kg/m²")
+
+
+    if reference_loading <= 0:
+         print(f"Error: Reference loading is zero or negative ({reference_loading}). Cannot calculate scale factor.")
+         return None
+         
+    # Calculate scale factor and adjust polar points
+    try:
+        scale_factor = sqrt(actual_loading / reference_loading)
+        print(f"Wing Loading Scale Factor: {scale_factor:.4f}")
+    except ValueError:
+         print(f"Error: Cannot calculate scale factor (sqrt of negative number?) - Loading issue.")
+         return None
+         
+    adj_speeds_kmh = [s * scale_factor for s in polar['polar_speeds']]
+    adj_sinks_ms = [s * scale_factor for s in polar['polar_sinks']]
+    print(f"Original Speeds (km/h): {polar['polar_speeds']}")
+    print(f"Adjusted Speeds (km/h): {[round(s, 2) for s in adj_speeds_kmh]}")
+    print(f"Original Sinks (m/s): {polar['polar_sinks']}")
+    print(f"Adjusted Sinks (m/s): {[round(s, 3) for s in adj_sinks_ms]}")
+
+    # Convert adjusted speeds to m/s for fitting
+    adj_speeds_mps = [s * KMH_TO_MPS for s in adj_speeds_kmh]
+
+    # Fit a quadratic polynomial to the *adjusted* polar data
+    try:
+        # Ensure sinks are negative for fitting convention if needed, though polyfit handles it
+        # adj_sinks_ms_fit = [-abs(s) for s in adj_sinks_ms] # Ensure sinks are negative if polyfit expects that convention
+        coeffs = np.polyfit(adj_speeds_mps, adj_sinks_ms, 2)
+        print(f"Fitted Quadratic Coefficients (a, b, c) on adjusted data: {coeffs}")
+    except Exception as e:
+        print(f"Error fitting quadratic to adjusted polar data: {e}")
+        return None
+    # The fitted quadratic is: sink = a*v² + b*v + c, where v is in m/s.
+    a_adj, b_adj, c_adj = coeffs[0], coeffs[1], coeffs[2]
+
+    # Define candidate speed range based on *adjusted* speeds
+    if not adj_speeds_kmh:
+        print("Error: Adjusted speeds list is empty.")
+        return None
+    min_adj_speed_kmh = min(adj_speeds_kmh)
+    max_adj_speed_kmh = max(adj_speeds_kmh)
+    # Add a small buffer to the range, e.g., 10% beyond the adjusted points
+    range_buffer_factor = 0.30
+    search_min_speed_kmh = min_adj_speed_kmh * (1 - range_buffer_factor)
+    search_max_speed_kmh = max_adj_speed_kmh * (1 + range_buffer_factor)
+    speed_step_kmh = 0.5
+    print(f"Candidate Speed Range (km/h): {search_min_speed_kmh:.1f} to {search_max_speed_kmh:.1f}")
+
+
+    MC_table = []
+    # Loop over MC values (in knots) as provided
+    for mc in np.arange(mc_range[0], mc_range[1] + mc_step, mc_step):
+        # Convert MC from knots to m/s.
+        mc_mps = mc / MPS_TO_KTS
+
+        best_ratio = -float('inf')
+        best_speed_kmh = None
+        best_speed_mps = None
+        best_sink_mps = None
+
+        # Search over candidate speeds (in km/h, within the adjusted range)
+        candidate_speeds = np.arange(search_min_speed_kmh, search_max_speed_kmh + speed_step_kmh, speed_step_kmh)
+        
+        if len(candidate_speeds) == 0:
+             print(f"Warning: No candidate speeds generated for MC={mc:.2f}. Check range.")
+             continue
+
+        for speed_kmh in candidate_speeds:
+            speed_mps = speed_kmh * KMH_TO_MPS
+            # Compute sink from the *adjusted* quadratic coefficients.
+            sink_mps = a_adj * speed_mps**2 + b_adj * speed_mps + c_adj
+
+            # Only consider speeds where sink is negative (i.e. descending).
+            if sink_mps >= 0:
+                continue
+
+            # Compute performance ratio: V / (|Sink| + MC)
+            # Ensure denominator is not zero (or very small)
+            denominator = abs(sink_mps) + mc_mps
+            if denominator < 1e-6: # Avoid division by zero or near-zero
+                continue
+                
+            ratio = speed_mps / denominator
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_speed_kmh = speed_kmh
+                best_speed_mps = speed_mps
+                best_sink_mps = sink_mps
+
+        if best_speed_kmh is None:
+            # Fallback if no suitable speed found (e.g., low MC, only positive sinks calculated)
+            # Use speed for minimum sink based on adjusted coefficients
+            # Min sink occurs at v = -b / (2*a)
+            if abs(a_adj) > 1e-9:
+                 best_speed_mps_fallback = -b_adj / (2 * a_adj)
+                 # Ensure fallback speed is within reasonable bounds of the adjusted polar speeds
+                 best_speed_mps_fallback = max(min(adj_speeds_mps), min(max(adj_speeds_mps), best_speed_mps_fallback))
+                 best_speed_kmh = best_speed_mps_fallback * MPS_TO_KMH
+                 best_speed_mps = best_speed_mps_fallback
+                 best_sink_mps = a_adj * best_speed_mps**2 + b_adj * best_speed_mps + c_adj
+                 print(f"Warning: No optimal speed found for MC={mc:.2f}. Using fallback speed for min sink: {best_speed_kmh:.1f} km/h")
+            else:
+                 # If a_adj is near zero (linear fit?), fallback might be less meaningful.
+                 # Use the lowest adjusted speed as a simple fallback.
+                 best_speed_mps = min(adj_speeds_mps)
+                 best_speed_kmh = best_speed_mps * MPS_TO_KMH
+                 best_sink_mps = a_adj * best_speed_mps**2 + b_adj * best_speed_mps + c_adj
+                 print(f"Warning: No optimal speed found for MC={mc:.2f} and a_adj near zero. Using lowest adjusted speed: {best_speed_kmh:.1f} km/h")
+
+
+            # If sink is still non-negative, something is wrong, but prevent division by zero later
+            if best_sink_mps >= 0:
+                best_sink_mps = -0.01 # Assign a very small negative sink
+
+        # L/D ratio computed using m/s values at the optimal point
+        ld = abs(best_speed_mps / best_sink_mps) if abs(best_sink_mps) > 0.001 else 0
+
+        # Convert optimum speed (already adjusted) to knots and sink (already adjusted) to knots.
+        speed_kts = best_speed_kmh * KMH_TO_KTS
+        sink_kts = best_sink_mps * MPS_TO_KTS
+
+        MC_table.append([mc, speed_kts, ld, sink_kts])
+
+    # Debug output: print the table in a formatted style.
+    print("-" * 50)
+    print(f"Generated MC Table for {glider_class} (Adjusted for WL={actual_loading:.2f} kg/m²)")
+    header = "{:>6} | {:>10} | {:>8} | {:>10}".format("MC_kts", "Speed_kts", "L/D", "Sink_kts")
+    print(header)
+    print("-" * len(header))
+    for row in MC_table[:5]: # Print first 5 rows
+        print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    if len(MC_table) > 10:
+        print("  ...")
+        for row in MC_table[-5:]: # Print last 5 rows
+            print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    elif len(MC_table) > 5:
+         for row in MC_table[5:]: # Print remaining rows if between 6 and 10 total
+             print("{:6.2f} | {:10.2f} | {:8.2f} | {:10.2f}".format(row[0], row[1], row[2], row[3]))
+    print("-" * 50)
+
+
+    return MC_table
+
+
+def calculate_MC_equivalent(flight_data, igc_data):
+    """
+    Calculates the equivalent MC setting's L/D and Sink Rate for the flown IAS.
+    Uses the polar adjusted for wing loading based on igc_data.
+    """
+    glider_class = None
+    # Find glider class in igc file
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_class = line[index + 1:].strip()
+                print(f"Found glider class: {glider_class}")
+                #break # Found it, no need to continue loop
+            except ValueError:
+                print(f"Warning: Malformed LCONFPLName line: {line.strip()}")
+
+    if not glider_class:
+        print("Error: Glider class not found in IGC data (LCONFPLName=). Cannot calculate MC equivalents.")
+        return flight_data # Return unmodified data if no glider class found
+
+    # Generate the MC table adjusted for wing loading
+    MC_table = generate_MC_table_from_plr(glider_class, igc_data)
+    if MC_table is None:
+        print(f"Error: Failed to generate MC table for {glider_class}. Cannot calculate MC equivalents.")
+        return flight_data # Return unmodified data if table generation failed
+
+    # Use MC_table to lookup values for each flight data point
+    for i in range(1, len(flight_data)): # Start from 1 to skip header
+        try:
+            # Assuming IAS_kt is at index 17 in each sublist of flight_data
+            # Ensure the value exists and is convertible to float
+            if len(flight_data[i]) > 17 and flight_data[i][17]:
+                 ias_kt = float(flight_data[i][17])
+            else:
+                 # Handle cases where IAS_kt might be missing or empty
+                 print(f"Warning: Missing or invalid IAS_kt at row {i}. Skipping MC equivalent calculation.")
+                 flight_data[i][18] = "" # MC LD
+                 flight_data[i][19] = "" # MC Sink
+                 continue
+
+
+            # Initialize variables to keep track of the closest match in the MC table's speeds
+            closest_diff = float('inf')
+            closest_row = None
+
+            # Iterate through the generated MC_table to find the row with the closest speed
+            for row in MC_table:
+                # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+                current_diff = abs(ias_kt - row[1]) # Compare with Speed_kts (index 1)
+                if current_diff < closest_diff:
+                    closest_diff = current_diff
+                    closest_row = row
+
+            # Update flight_data with the L/D and Sink Rate from the best matching row
+            if closest_row:
+                flight_data[i][18] = str(round(closest_row[2], 1)) # MC_LD_at_IAS_kt (L/D is index 2)
+                flight_data[i][19] = str(round(closest_row[3], 3)) # MC_sinkrate_at_IAS_kt (Sink is index 3)
+            else:
+                # Should not happen if MC_table is valid, but handle defensively
+                 print(f"Warning: No closest row found in MC table for IAS {ias_kt:.1f} kts at row {i}.")
+                 flight_data[i][18] = ""
+                 flight_data[i][19] = ""
+
+        except (ValueError, IndexError, TypeError) as e:
+             # Catch potential errors during conversion or access
+             print(f"Error processing row {i} for MC equivalent: {e}. Data: {flight_data[i]}")
+             # Assign empty strings to indicate failure for this row
+             if len(flight_data[i]) > 19:
+                  flight_data[i][18] = ""
+                  flight_data[i][19] = ""
+             continue # Move to the next row
+
+    return flight_data
+
+def ideal_MC_given_avg_ias_kts(igc_data, airspeed_kts, climbrate_kts):
+    """
+    Given average IAS and climb rate, finds the ideal MC setting, corresponding speed, and L/D.
+    Uses the polar adjusted for wing loading based on igc_data.
+    """
+    glider_class = None
+    # Find glider class in igc file
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_class = line[index + 1:].strip()
+                print(f"Found glider class for ideal MC lookup: {glider_class}")
+                #break
+            except ValueError:
+                 print(f"Warning: Malformed LCONFPLName line: {line.strip()}")
+
+
+    if not glider_class:
+        print("Error: Glider class not found in IGC data (LCONFPLName=). Cannot calculate ideal MC.")
+        return None, None, None
+
+    # Generate the MC table adjusted for wing loading
+    MC_table = generate_MC_table_from_plr(glider_class, igc_data)
+    if MC_table is None:
+        print(f"Error: Failed to generate MC table for {glider_class}. Cannot calculate ideal MC.")
+        return None, None, None
+
+    try:
+        # Convert input values to float for comparison
+        airspeed_kts = float(airspeed_kts)
+        climbrate_kts = float(climbrate_kts)
+
+        # --- Find the MC table row where Speed_kts is closest to the input airspeed_kts ---
+        closest_diff_airspeed = float('inf')
+        closest_row_airspeed = None
+        for row in MC_table:
+            # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+            current_diff = abs(airspeed_kts - row[1]) # Compare with Speed_kts (index 1)
+            if current_diff < closest_diff_airspeed:
+                closest_diff_airspeed = current_diff
+                closest_row_airspeed = row
+        
+        # The MC setting corresponding to the flown airspeed
+        ideal_mc_setting_for_ias = closest_row_airspeed[0] if closest_row_airspeed else None # MC is index 0
+
+        # --- Find the MC table row where MC_kts is closest to the input climbrate_kts ---
+        # Note: We are matching climb rate (positive) to MC setting (also effectively positive lift/energy gain rate)
+        closest_diff_climbrate = float('inf')
+        closest_row_climbrate = None
+        for row in MC_table:
+             # row structure: [MC (kts), Speed (kts), L/D, Sink (kts)]
+             current_diff = abs(climbrate_kts - row[0]) # Compare climbrate with MC_kts (index 0)
+             if current_diff < closest_diff_climbrate:
+                 closest_diff_climbrate = current_diff
+                 closest_row_climbrate = row
+
+        # The speed corresponding to the achieved climb rate (treated as an MC setting)
+        ideal_speed_for_climb = closest_row_climbrate[1] if closest_row_climbrate else None # Speed is index 1
+        
+        # --- Get the L/D for the flown airspeed ---
+        ld_at_flown_ias = closest_row_airspeed[2] if closest_row_airspeed else None # L/D is index 2
+
+
+        if ideal_mc_setting_for_ias is not None and ideal_speed_for_climb is not None and ld_at_flown_ias is not None:
+             print(f"Ideal MC for IAS {airspeed_kts:.1f} kts: {round(float(ideal_mc_setting_for_ias),2)} kts")
+             print(f"Ideal Speed for Climb {climbrate_kts:.2f} kts: {round(float(ideal_speed_for_climb),0)} kts")
+             print(f"L/D at flown IAS {airspeed_kts:.1f} kts: {ld_at_flown_ias:.1f}")
+             return (round(float(ideal_mc_setting_for_ias),2), # Ideal MC setting for the speed flown
+                     round(float(ideal_speed_for_climb),0),    # Ideal speed to fly for the climb achieved
+                     float(ld_at_flown_ias))          # L/D achieved at the speed flown
+        else:
+             print("Warning: Could not find complete ideal MC/Speed/LD information.")
+             return None, None, None
+
+    except Exception as e:
+        print(f"Error in ideal_MC_given_avg_ias_kts: {e}")
+        return None, None, None
+
+def get_glider_type(igc_data):
+    """
+    Extract glider type from IGC data.
+    
+    Args:
+        igc_data (list): List of strings representing lines from an IGC file.
+        
+    Returns:
+        str: Glider type or "Unknown Glider" if not found
+    """
+    glider_type = "Unknown Glider"
+    for line in igc_data:
+        if 'LCONFPLName=' in line:
+            try:
+                index = line.index('=')
+                glider_type = line[index + 1:].strip()
+            except (ValueError, IndexError):
+                pass
+    return glider_type
+
+def parse_igc_coordinates(lat_str, lon_str):
+    """
+    Parse IGC format coordinates to decimal degrees.
+    
+    Args:
+        lat_str: IGC latitude string (e.g., "3317048N")
+        lon_str: IGC longitude string (e.g., "11640080W")
+        
+    Returns:
+        tuple: (latitude, longitude) in decimal degrees
+    """
+    try:
+        # Extract degrees, minutes, decimal minutes and direction
+        lat_deg = int(lat_str[:2])
+        lat_min = float(lat_str[2:7]) / 1000  # Convert to minutes.decimal_minutes
+        lat_dir = lat_str[7]
+        
+        lon_deg = int(lon_str[:3])
+        lon_min = float(lon_str[3:8]) / 1000  # Convert to minutes.decimal_minutes
+        lon_dir = lon_str[8]
+        
+        # Convert to decimal degrees
+        lat = lat_deg + (lat_min / 60.0)
+        lon = lon_deg + (lon_min / 60.0)
+        
+        # Apply direction (S and W are negative)
+        if lat_dir == 'S':
+            lat = -lat
+        if lon_dir == 'W':
+            lon = -lon
+            
+        return lat, lon
+    except (ValueError, IndexError, TypeError) as e:
+        print(f"Error parsing IGC coordinates: {e}")
+        return None, None
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great-circle distance between two points in kilometers
+    using the haversine formula.
+    
+    Args:
+        lat1, lon1: Coordinates of first point in decimal degrees
+        lat2, lon2: Coordinates of second point in decimal degrees
+        
+    Returns:
+        float: Distance in kilometers
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    r = 6371  # Radius of Earth in kilometers
+    
+    return c * r
+
+def bearing(lat1, lon1, lat2, lon2):
+    """
+    Calculate the bearing from point 1 to point 2 in degrees.
+    
+    Args:
+        lat1, lon1: Coordinates of first point in decimal degrees
+        lat2, lon2: Coordinates of second point in decimal degrees
+        
+    Returns:
+        float: Bearing in degrees (0-360)
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Calculate bearing
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - (sin(lat1) * cos(lat2) * cos(dlon))
+
+    bearing = math.atan2(y, x)
+    
+    # Convert to degrees and normalize to 0-360
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+    
+    return bearing
+
+def crossed_line(prev_lat, prev_lon, curr_lat, curr_lon, line_point_lat, line_point_lon, line_bearing, line_half_width):
+    """
+    Check if a path from prev_point to curr_point crosses a finish line.
+    
+    Args:
+        prev_lat, prev_lon: Previous position
+        curr_lat, curr_lon: Current position
+        line_point_lat, line_point_lon: Center point of the finish line
+        line_bearing: Bearing of the line in degrees (perpendicular to the direction of approach)
+        line_half_width: Half the width of the finish line in kilometers
+        
+    Returns:
+        bool: True if the path crosses the finish line
+    """
+    # Calculate distance from line center point to both positions
+    dist_prev = haversine_distance(prev_lat, prev_lon, line_point_lat, line_point_lon)
+    dist_curr = haversine_distance(curr_lat, curr_lon, line_point_lat, line_point_lon)
+    
+    # Get bearings to both positions from the line center
+    bearing_to_prev = bearing(line_point_lat, line_point_lon, prev_lat, prev_lon)
+    bearing_to_curr = bearing(line_point_lat, line_point_lon, curr_lat, curr_lon)
+    
+    # Calculate the angle differences between these bearings and the line bearing
+    # Normalize to -180 to +180 degrees
+    angle_diff_prev = ((bearing_to_prev - line_bearing + 180) % 360) - 180
+    angle_diff_curr = ((bearing_to_curr - line_bearing + 180) % 360) - 180
+    
+    # The line divides the plane into two half-planes
+    # If points are on opposite sides of the line, they have opposite signs of angle difference
+    on_opposite_sides = (angle_diff_prev * angle_diff_curr) <= 0
+    
+    # Also check if both points are within range of the finish line
+    within_range_prev = dist_prev <= line_half_width
+    within_range_curr = dist_curr <= line_half_width
+    
+    # Check distance to line (not just the center point)
+    dist_prev_to_line = abs(dist_prev * math.sin(math.radians(abs(angle_diff_prev))))
+    dist_curr_to_line = abs(dist_curr * math.sin(math.radians(abs(angle_diff_curr))))
+    
+    # The path crosses the line if:
+    # 1. The points are on opposite sides of the line, AND
+    # 2. Both points are within range of the finish line width
+    return on_opposite_sides and (within_range_prev or within_range_curr)
+
+def detect_actual_finish_point(flight_data, fpl_file):
+    """
+    Detects the actual finish point in flight data based on task geometry from FPL.
+    
+    Args:
+        flight_data: List of flight records
+        fpl_file: Path to the FPL file containing task information
+        
+    Returns:
+        tuple: (finish_index, finish_time) where finish_index is the index in flight_data
+    """
+    # Check if fpl_file exists
+    if not fpl_file or not os.path.exists(fpl_file):
+        print(f"FPL file not found: {fpl_file}")
+        return None, None
+    
+    try:
+        # Parse turnpoints from FPL file
+        with open(fpl_file, 'r') as f:
+            fpl_lines = f.readlines()
+            
+        # Parse turnpoints from FPL using the same logic as in generateSummary.py
+        turnpoints = []
+        tp_count = 0
+        
+        # First get number of turnpoints
+        for line in fpl_lines:
+            if line.startswith("Count="):
+                try:
+                    tp_count = int(line.split("=")[1].strip())
+                    break
+                except ValueError:
+                    print("Error parsing turnpoint count from FPL")
+                    return None, None
+                    
+        if tp_count < 2:  # Need at least start and finish points
+            print("Not enough turnpoints in FPL")
+            return None, None
+        
+        # Then parse each turnpoint
+        current_tp = {}
+        for line in fpl_lines:
+            for i in range(tp_count):
+                if line.startswith(f"TPName{i}="):
+                    current_tp = {'index': i, 'name': line.split("=")[1].strip()}
+                elif line.startswith(f"TPPosX{i}="):
+                    try:
+                        current_tp['x'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPPosY{i}="):
+                    try:
+                        current_tp['y'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPRadius{i}="):
+                    try:
+                        current_tp['radius'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPAngle{i}="):
+                    try:
+                        current_tp['angle'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                elif line.startswith(f"TPWidth{i}="):
+                    try:
+                        current_tp['width'] = float(line.split("=")[1].strip())
+                    except ValueError:
+                        continue
+                    
+                # Check if we have all the required fields
+                if 'index' in current_tp and 'x' in current_tp and 'y' in current_tp and 'radius' in current_tp and 'angle' in current_tp:
+                    turnpoints.append(current_tp.copy())
+                    current_tp = {}  # Reset for the next turnpoint
+        
+        # Sort turnpoints by index
+        turnpoints.sort(key=lambda tp: tp['index'])
+        
+        if not turnpoints:
+            print("No turnpoints found in FPL")
+            return None, None
+        
+        print(f"Successfully parsed {len(turnpoints)} turnpoints from FPL file")
+            
+        # Finish point is the last turnpoint
+        finish_tp = turnpoints[-1]
+        
+        # Get the second to last turnpoint for approach direction
+        approach_tp = turnpoints[-2] if len(turnpoints) > 1 else None
+        
+        # Determine if finish is a cylinder or a line
+        is_cylinder = abs(finish_tp.get('angle', 0) - 360) < 1
+        
+        print(f"Finish point is {'a cylinder' if is_cylinder else 'a line'} with " + 
+              f"radius={finish_tp.get('radius', 0)/1000:.2f}km, " + 
+              f"angle={finish_tp.get('angle', 0):.1f}°")
+        
+        # For safety, only look at records after 60% of the flight 
+        # This avoids false detection when passing the finish area earlier in the flight
+        search_start_idx = int(len(flight_data) * 0.6)
+        
+        # Store IGC records with valid coordinates for analysis
+        valid_records = []
+        for i in range(search_start_idx, len(flight_data)):
+            record = flight_data[i]
+            if len(record) > 3 and record[0] == 'B':
+                try:
+                    # Check if we have valid coordinate fields
+                    if len(record[2]) >= 8 and len(record[3]) >= 9:
+                        lat, lon = parse_igc_coordinates(record[2], record[3])
+                        if lat is not None and lon is not None:
+                            valid_records.append((i, lat, lon, record[1]))  # (index, lat, lon, time)
+                except Exception as e:
+                    continue
+        
+        if len(valid_records) < 2:
+            print("Not enough valid GPS records found")
+            return None, None
+        
+        print(f"Searching through {len(valid_records)} valid GPS records for finish crossing")
+        
+        # Note: Condor FPL coordinates (x,y) don't directly translate to lat/lon
+        # We need to establish a relative coordinate system based on the finish point and the approach
+        
+        # Strategy: Convert lat/lon to a local Cartesian system centered on the finish point
+        # This is a simplified approximation for this specific task
+        
+        # Calculate the center point of the finish cylinder
+        # The challenge is that we don't know the exact lat/lon of the finish point from FPL
+        # So we'll estimate it using the approach direction and the last few points
+        
+        # For cylinder finish:
+        if is_cylinder and len(valid_records) >= 2:
+            # Look backwards through the flight track
+            finish_detected = False
+            for j in range(len(valid_records) - 1, 0, -1):
+                curr_idx, curr_lat, curr_lon, curr_time = valid_records[j]
+                prev_idx, prev_lat, prev_lon, prev_time = valid_records[j-1]
+                
+                # First find the finish center lat/lon by using the last 10 points
+                # to extrapolate backwards in the direction of the last turnpoint
+                if j == len(valid_records) - 1:
+                    # Get the last few points to determine approach direction
+                    final_points = valid_records[-min(10, len(valid_records)):]
+                    first_lat, first_lon = final_points[0][1], final_points[0][2]
+                    last_lat, last_lon = final_points[-1][1], final_points[-1][2]
+                    
+                    # Calculate the bearing of the approach
+                    approach_bearing = bearing(first_lat, first_lon, last_lat, last_lon)
+                    
+                    # Estimate finish center by extending from the last point
+                    # in the opposite direction of approach
+                    inverse_bearing = (approach_bearing + 180) % 360
+                    finish_radius_km = finish_tp.get('radius', 0) / 1000  # Convert to km
+                    
+                    # Calculate a point that's approximately 80% of the way to the finish center
+                    # This is a heuristic to estimate where the finish center might be
+                    estimated_dist = finish_radius_km * 0.8
+                    finish_center_lat, finish_center_lon = destination_point(
+                        last_lat, last_lon, inverse_bearing, estimated_dist)
+                    
+                    print(f"Estimated finish center at lat={finish_center_lat:.6f}, lon={finish_center_lon:.6f}")
+                    print(f"Using finish radius of {finish_radius_km:.2f} km")
+                
+                # Calculate distance from current point to estimated finish center
+                dist_to_finish = haversine_distance(curr_lat, curr_lon, finish_center_lat, finish_center_lon)
+                
+                # Calculate distance from previous point to estimated finish center
+                prev_dist_to_finish = haversine_distance(prev_lat, prev_lon, finish_center_lat, finish_center_lon)
+                
+                # Check if we're crossing into the finish cylinder
+                if prev_dist_to_finish > finish_radius_km and dist_to_finish <= finish_radius_km:
+                    print(f"Detected finish cylinder crossing at index {curr_idx}, time {curr_time}")
+                    print(f"Distance to finish center: {dist_to_finish:.2f} km, radius: {finish_radius_km:.2f} km")
+                    return curr_idx, curr_time
+            
+            # If we didn't find a finish crossing, but we're inside the cylinder at the end
+            last_idx, last_lat, last_lon, last_time = valid_records[-1]
+            dist_to_finish = haversine_distance(last_lat, last_lon, finish_center_lat, finish_center_lon)
+            if dist_to_finish <= finish_radius_km:
+                print(f"Already inside finish cylinder at the end of flight, using index {last_idx}")
+                return last_idx, last_time
+                
+        # For line finish (less common in Condor, but supported):
+        elif not is_cylinder and approach_tp and len(valid_records) >= 2:
+            # For line finish, we need to detect when we cross the line
+            # This is a simplified version assuming the finish line is perpendicular to the approach
+            print("Line finish detection not fully implemented, falling back to last B-record")
+        
+        # Fallback - use the last valid B-record
+        last_valid_index = valid_records[-1][0]
+        
+        print(f"No finish crossing detected, using last valid B-record at index {last_valid_index} as fallback")
+        return last_valid_index, valid_records[-1][3]
+        
+    except Exception as e:
+        print(f"Error in finish point detection: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+def destination_point(lat, lon, bearing, distance):
+    """
+    Calculate the destination point given a start point, bearing and distance
+    
+    Args:
+        lat, lon: Starting coordinates in decimal degrees
+        bearing: Bearing in degrees (0 = north, 90 = east)
+        distance: Distance in kilometers
+        
+    Returns:
+        tuple: (lat, lon) of destination point
+    """
+    # Constants for Earth
+    R = 6371.0  # Earth radius in km
+    
+    # Convert from degrees to radians
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+    bearing_rad = math.radians(bearing)
+    
+    # Calculate destination point
+    lat2 = math.asin(math.sin(lat1) * math.cos(distance/R) + 
+                     math.cos(lat1) * math.sin(distance/R) * math.cos(bearing_rad))
+    
+    lon2 = lon1 + math.atan2(math.sin(bearing_rad) * math.sin(distance/R) * math.cos(lat1),
+                             math.cos(distance/R) - math.sin(lat1) * math.sin(lat2))
+    
+    # Convert back to degrees
+    lat2 = math.degrees(lat2)
+    lon2 = math.degrees(lon2)
+    
+    return lat2, lon2
